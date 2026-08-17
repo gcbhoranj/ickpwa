@@ -59,6 +59,13 @@ function requireSession_(sessionId) {
   return session;
 }
 
+function requireRole_(session, allowedRoles) {
+  if (allowedRoles.indexOf(session.role) === -1) {
+    throw apiError_('FORBIDDEN', 'Your role does not have access to this action.');
+  }
+  return session;
+}
+
 // Sheets can silently rewrite a boolean cell's stored value from the JS boolean `true`
 // to the string `"true"` when the row is rewritten in place (e.g. by updateRowById_ against
 // a plain-text-formatted cell). Compare loosely so both representations are recognized.

@@ -122,6 +122,25 @@ function test_auth_findActiveUser_handlesStringBooleanActive() {
   }
 }
 
+function test_auth_requireRole() {
+  const adminSession = { userId: 'USR-TEST', role: ROLES.ADMIN, sessionId: 'x' };
+  const messSession = { userId: 'USR-TEST2', role: ROLES.MESS, sessionId: 'y' };
+
+  assertEqual_(requireRole_(adminSession, [ROLES.ADMIN]), adminSession, 'allowed role should pass through unchanged');
+
+  let threw = false;
+  try {
+    requireRole_(messSession, [ROLES.ADMIN]);
+  } catch (err) {
+    threw = true;
+    assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for disallowed role');
+  }
+  assertTrue_(threw, 'requireRole_ did not throw for a disallowed role');
+
+  // multiple allowed roles
+  assertEqual_(requireRole_(messSession, [ROLES.ADMIN, ROLES.MESS]), messSession, 'role present in a multi-role allow-list should pass');
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -129,7 +148,8 @@ const TEST_CASES = [
   { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique },
   { name: 'auth_passwordHashing', fn: test_auth_passwordHashing },
   { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle },
-  { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive }
+  { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive },
+  { name: 'auth_requireRole', fn: test_auth_requireRole }
 ];
 
 function runAllTests_() {
