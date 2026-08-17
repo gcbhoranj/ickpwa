@@ -245,6 +245,13 @@ function test_auth_setUserActive_togglesAndGuardsLastAdmin() {
   }
 }
 
+function test_bootstrap_actionsRequireAdmin() {
+  const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+  let threw1 = false;
+  try { requireRole_(messSession, [ROLES.ADMIN]); } catch (err) { threw1 = true; assertEqual_(err.code, 'FORBIDDEN', 'requireRole_ gate check'); }
+  assertTrue_(threw1, 'requireRole_ sanity check failed');
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -256,7 +263,8 @@ const TEST_CASES = [
   { name: 'auth_requireRole', fn: test_auth_requireRole },
   { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness },
   { name: 'auth_listUsers_excludesSecretsAndGatesRole', fn: test_auth_listUsers_excludesSecretsAndGatesRole },
-  { name: 'auth_setUserActive_togglesAndGuardsLastAdmin', fn: test_auth_setUserActive_togglesAndGuardsLastAdmin }
+  { name: 'auth_setUserActive_togglesAndGuardsLastAdmin', fn: test_auth_setUserActive_togglesAndGuardsLastAdmin },
+  { name: 'bootstrap_actionsRequireAdmin', fn: test_bootstrap_actionsRequireAdmin }
 ];
 
 function runAllTests_() {

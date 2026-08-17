@@ -41,13 +41,16 @@ const ACTIONS = {
     }
     return runAllTests_();
   },
-  'admin.bootstrap.setupSchema': function () {
+  'admin.bootstrap.setupSchema': function (payload, sessionId) {
+    requireRole_(requireSession_(sessionId), [ROLES.ADMIN]);
     return { sheetsEnsured: setupSchema_() };
   },
-  'admin.bootstrap.seedSettings': function () {
+  'admin.bootstrap.seedSettings': function (payload, sessionId) {
+    requireRole_(requireSession_(sessionId), [ROLES.ADMIN]);
     return { keysSeeded: seedSettings_() };
   },
-  'admin.bootstrap.setupDriveFolders': function () {
+  'admin.bootstrap.setupDriveFolders': function (payload, sessionId) {
+    requireRole_(requireSession_(sessionId), [ROLES.ADMIN]);
     return setupDriveFolders_();
   },
   'admin.bootstrap.seedFirstAdmin': function (payload) {
