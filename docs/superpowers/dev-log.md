@@ -54,3 +54,21 @@ During live deployment testing (Task 8), a production login bug was discovered: 
   the human during verification — left as-is (disable/re-enable/repurpose via the Users
   screen whenever convenient; nothing about them is fake or broken, they're just early
   manual-test data).
+
+### Bug fixed during Phase 2: stale service worker cache on redeploy
+
+Live verification of the Task 9 deploy initially failed — the human logged into the real
+public URL and saw the old Phase 1 landing screen with no "Manage Users" button, even though
+the server was confirmed (via direct curl) to be serving the correct Phase 2 files. Root
+cause: this is exactly the "Known Gotchas" item documented in `README.md` after Phase 1 —
+`service-worker.js`'s `CACHE_NAME` must be bumped on every deploy that changes any cached
+file, because the browser only re-runs the service worker's install/cache-refresh cycle when
+`service-worker.js`'s own bytes change. This Task 9 deploy changed `index.html`, `app.js`,
+`css/app.css`, and added `js/users.js` without touching `service-worker.js`, so browsers with
+the Phase 1 worker already installed (anyone who'd visited the site before) kept serving the
+stale cached shell indefinitely. Fixed by bumping `CACHE_NAME` to `'hpuick-shell-v2'` and
+adding `js/users.js` to the precached `SHELL_FILES` list, then redeploying. Verified fixed on
+the real live URL after a reload. **Lesson reinforced, now written twice:** bumping
+`CACHE_NAME` needs to become a standard step of every frontend deploy, not just a documented
+warning — worth adding a pre-deploy checklist item or an automated version stamp in a later
+phase so this can't be forgotten a third time.
