@@ -37,6 +37,15 @@ const ACTIONS = {
   },
   'system.selfTest': function () {
     return runAllTests_();
+  },
+  'admin.bootstrap.setupSchema': function () {
+    return { sheetsEnsured: setupSchema_() };
+  },
+  'admin.bootstrap.seedSettings': function () {
+    return { keysSeeded: seedSettings_() };
+  },
+  'admin.bootstrap.setupDriveFolders': function () {
+    return setupDriveFolders_();
   }
 };
 

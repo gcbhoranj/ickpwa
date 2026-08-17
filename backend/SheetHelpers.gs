@@ -111,7 +111,12 @@ function deleteRowById_(sheetName, idColumn, idValue) {
 
 function getSetting_(key, defaultValue) {
   const found = findRowById_('SETTINGS', 'Key', key);
-  return found ? found.values.Value : defaultValue;
+  if (found) {
+    const value = found.values.Value;
+    // Google Sheets may interpret string values like 'false' as booleans; ensure we return strings
+    return typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+  }
+  return defaultValue;
 }
 
 function setSetting_(key, value, actorId) {

@@ -29,9 +29,22 @@ function test_sheetHelpers_appendFindUpdateDelete() {
   assertEqual_(getSetting_(testKey, null), null, 'cleanup delete failed');
 }
 
+function test_setup_schemaAndSettingsIdempotent() {
+  const firstRun = setupSchema_();
+  assertEqual_(firstRun.length, Object.keys(SHEET_SCHEMAS).length, 'setupSchema_ did not ensure every sheet');
+  const secondRun = setupSchema_(); // idempotency check
+  assertEqual_(secondRun.length, firstRun.length, 'setupSchema_ not idempotent');
+
+  seedSettings_();
+  assertEqual_(getSetting_('FinancialSettingsLocked', null), 'false', 'default lock state missing');
+  assertEqual_(getSetting_('Numbering_Receipt_Prefix', null), 'GCB/HPUICK/Receipt-', 'receipt prefix not seeded');
+  assertEqual_(getSetting_('AllowSelfTest', null), 'true', 'AllowSelfTest not seeded');
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
-  { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete }
+  { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
+  { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent }
 ];
 
 function runAllTests_() {
