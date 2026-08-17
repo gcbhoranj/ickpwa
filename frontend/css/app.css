@@ -20,7 +20,7 @@ body {
 h1 { font-size: 1.3rem; color: var(--brand); margin: 0 0 4px; }
 .subtitle { color: #555; font-size: 0.9rem; margin: 0 0 20px; }
 form label { display: block; text-align: left; font-size: 0.85rem; margin: 12px 0 4px; color: #333; }
-form input {
+form input, form select {
   width: 100%; padding: 10px 12px; font-size: 1rem; border: 1px solid #ccc;
   border-radius: 8px; margin-top: 4px;
 }
@@ -30,3 +30,8 @@ button {
 }
 button:hover { background: var(--brand-light); }
 .error { color: var(--error); font-size: 0.85rem; margin: 8px 0; }
+
+table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+.users-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 600px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+.toggle-btn { width: auto; margin: 0; padding: 4px 10px; font-size: 0.8rem; }

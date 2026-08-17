@@ -31,14 +31,23 @@ function renderLogin(root, errorMessage) {
 }
 
 function renderLanding(root, user) {
+  const isAdmin = user.role === 'ADMIN';
   root.innerHTML =
     '<div class="landing-card">' +
       '<h1>Welcome, ' + user.name + '</h1>' +
       '<p class="subtitle">' + (ROLE_LABELS[user.role] || user.role) + '</p>' +
-      '<p>This role\'s screens are built in a later phase. Foundation phase confirms your ' +
-      'login and session work end-to-end.</p>' +
+      (isAdmin
+        ? '<p>Manage committee accounts below. Other screens are built in a later phase.</p>'
+        : '<p>This role\'s screens are built in a later phase. Foundation phase confirms your ' +
+          'login and session work end-to-end.</p>') +
+      (isAdmin ? '<button id="manage-users-btn">Manage Users</button>' : '') +
       '<button id="logout-btn">Log Out</button>' +
     '</div>';
+  if (isAdmin) {
+    document.getElementById('manage-users-btn').addEventListener('click', function () {
+      renderUsersScreen(root, user);
+    });
+  }
   document.getElementById('logout-btn').addEventListener('click', async function () {
     await logout();
     renderLogin(root, null);
