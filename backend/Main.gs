@@ -92,6 +92,10 @@ const ACTIONS = {
   'settings.getRegistrationInfo': function (payload, sessionId) {
     requireSession_(sessionId);
     return getRegistrationInfo_(null);
+  },
+  'registration.team.create': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);
   }
 };
 

@@ -47,12 +47,18 @@ function appendRow_(sheetName, obj) {
   const row = headers.map(function (h) {
     return obj.hasOwnProperty(h) ? obj[h] : '';
   });
-  sheet.appendRow(row);
-  // Format the newly-appended row as plain text to prevent Google Sheets from auto-converting
-  // string values like '2026-09-21' to dates or 'false' to booleans. Applied after append
-  // to ensure the row number is correct.
-  const newRowNum = sheet.getLastRow();
-  sheet.getRange(newRowNum, 1, 1, headers.length).setNumberFormat('@');
+  // Root-cause fix (found in Phase 3, deferred as a known risk since Phase 1): formatting
+  // AFTER sheet.appendRow(row) does not retroactively fix a value Sheets already auto-typed
+  // at write time (e.g. the string 'true' silently becoming a native boolean) — the format
+  // change only affects future entries into that cell, not the one just written. Determine
+  // the target row ourselves and format it as plain text BEFORE writing, matching
+  // updateRowById_'s already-correct order, so every appendRow_ call across all 25 sheets is
+  // protected the same way, not just the ones that happened to get manually tolerant-reader
+  // workarounds (like _isActiveFlag_).
+  const newRowNum = sheet.getLastRow() + 1;
+  const targetRange = sheet.getRange(newRowNum, 1, 1, headers.length);
+  targetRange.setNumberFormat('@');
+  targetRange.setValues([row]);
   return obj;
 }
 

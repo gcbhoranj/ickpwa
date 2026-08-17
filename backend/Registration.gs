@@ -1,0 +1,42 @@
+// Registration.gs — team + contingent incharges registration.
+
+function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMembers, incharges) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  if (!collegeName) throw apiError_('VALIDATION_ERROR', 'College name is required.');
+  if (!districtName) throw apiError_('VALIDATION_ERROR', 'District name is required.');
+  const members = parseInt(numberOfTeamMembers, 10);
+  if (!members || members < 1) throw apiError_('VALIDATION_ERROR', 'Number of team members must be at least 1.');
+  if (!incharges || incharges.length === 0) throw apiError_('VALIDATION_ERROR', 'At least one contingent incharge is required.');
+  incharges.forEach(function (inc) {
+    if (!inc.name) throw apiError_('VALIDATION_ERROR', 'Every incharge needs a name.');
+  });
+
+  const hasPrimary = incharges.some(function (inc) { return !!inc.isPrimary; });
+  const totalContingent = members + incharges.length;
+  const teamId = nextId_('TEAM', 4);
+  const registrationNumber = nextDocumentNumber_('Registration');
+  const now = new Date().toISOString();
+
+  appendRow_('TEAMS', {
+    TeamId: teamId, RegistrationNumber: registrationNumber, CollegeName: collegeName, DistrictName: districtName,
+    NumberOfTeamMembers: members, NumberOfContingentIncharges: incharges.length, TotalContingentPersons: totalContingent,
+    RegistrationDateTime: now, Status: 'REGISTERED', DepartureLockedBy: '', DepartureLockedAt: '',
+    CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
+  });
+
+  incharges.forEach(function (inc, i) {
+    appendRow_('CONTINGENT_INCHARGES', {
+      InchargeId: nextId_('INC', 4), TeamId: teamId, Name: inc.name, Designation: inc.designation || '',
+      WhatsAppNumber: inc.whatsapp || '', EmailAddress: inc.email || '',
+      IsPrimary: (hasPrimary ? !!inc.isPrimary : i === 0) ? 'true' : 'false', Active: 'true',
+      CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
+    });
+  });
+
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'REGISTER_TEAM', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: 'REGISTERED'
+  });
+
+  return { teamId: teamId, registrationNumber: registrationNumber, totalContingentPersons: totalContingent };
+}

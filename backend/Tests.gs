@@ -327,6 +327,49 @@ function test_settings_updateRatesAndLock() {
   setFinancialLock_(adminSession, false); // restore unlocked state for later tasks/tests
 }
 
+function test_registration_registerTeam_validationAndCreation() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const result = registerTeam_(regSession, 'Test College', 'Test District', 12, [
+      { name: 'Incharge One', designation: 'Coach', whatsapp: '9999999999', email: '', isPrimary: false },
+      { name: 'Incharge Two', designation: 'Manager', whatsapp: '', email: 'two@example.com', isPrimary: false }
+    ]);
+    createdTeamId = result.teamId;
+    assertEqual_(result.totalContingentPersons, 14, 'total contingent should be 12 members + 2 incharges');
+    assertTrue_(!!result.registrationNumber, 'registerTeam_ did not return a registration number');
+
+    const team = findRowById_('TEAMS', 'TeamId', createdTeamId).values;
+    assertEqual_(team.Status, 'REGISTERED', 'new team should start REGISTERED');
+    // Numeric fields round-trip through Sheets' plain-text-formatted cells as strings (by
+    // design, per the Phase 1 type-coercion fix) — compare via Number() like the rest of the
+    // codebase does (e.g. calculateCharges_ already does this), not a raw strict equality.
+    assertEqual_(Number(team.NumberOfContingentIncharges), 2, 'incharge count mismatch on TEAMS row');
+
+    const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId);
+    assertEqual_(incharges.length, 2, 'expected 2 incharge rows');
+    const primaryCount = incharges.filter(function (i) { return i.IsPrimary === 'true'; }).length;
+    assertEqual_(primaryCount, 1, 'exactly one incharge should be auto-marked primary when none was specified');
+
+    // validation: no incharges
+    let threwNoIncharges = false;
+    try {
+      registerTeam_(regSession, 'X', 'Y', 5, []);
+    } catch (err) {
+      threwNoIncharges = true;
+      assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong error code for zero incharges');
+    }
+    assertTrue_(threwNoIncharges, 'registerTeam_ did not reject zero incharges');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) {
+        deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId);
+      });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -342,7 +385,8 @@ const TEST_CASES = [
   { name: 'bootstrap_actionsRequireAdmin', fn: test_bootstrap_actionsRequireAdmin },
   { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
   { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
-  { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock }
+  { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
+  { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation }
 ];
 
 function runAllTests_() {
