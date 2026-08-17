@@ -36,7 +36,8 @@ not for enterprise scale.
 PWA (static HTML/CSS/JS, installable, manifest + service worker)
   hosted on GitHub Pages (free, public repo — no secrets in frontend code)
         │
-        │  fetch() JSON POST, Authorization: Bearer <session token>
+        │  fetch() POST, Content-Type: text/plain, sessionId carried in the JSON body
+        │  (see §16 — Apps Script can't read headers or handle CORS preflight)
         ▼
 Google Apps Script Web App  (doPost/doGet single entry point)
   deployed "Execute as: Me (gcbhoranj@gmail.com)", access "Anyone"
@@ -88,10 +89,13 @@ committee member is acting, for permissions and audit trail.
   to decode, nothing to forge without guessing a random string), `UserId`, `Role`, `IssuedAt`,
   `ExpiresAt`, `Status(ACTIVE/REVOKED/EXPIRED)`. No script-wide secret is needed for this, so
   there's nothing sensitive to leak beyond the session records themselves.
-- The PWA stores the SessionId (e.g. `localStorage`) and sends it as the auth credential on
-  every call (transport detail — header vs body — decided empirically by the connectivity
-  POC in §17, not assumed up front). A lightweight refresh call extends `ExpiresAt` while the
-  user stays active.
+- The PWA stores the SessionId (e.g. `localStorage`) and sends it as a field in the JSON body
+  of every POST request (`Content-Type: text/plain`, parsed server-side) — never as an
+  `Authorization` header. This isn't a style preference: the connectivity POC in §16 found
+  that Apps Script Web Apps can't complete a CORS preflight (which a custom header forces)
+  *and* that `doPost`/`doGet` can't read incoming headers at all even when a preflight
+  succeeds — so body-carried credentials are the only transport that actually works. A
+  lightweight refresh call extends `ExpiresAt` while the user stays active.
 - Every backend handler looks up the SessionId → `{userId, role}` **before** doing anything
   else, rejecting missing/expired/revoked sessions, and re-checks the role is authorized for
   the requested action — the frontend hiding a button is a UX nicety only, never the
@@ -262,7 +266,8 @@ Single Web App entry point, `doPost(e)` routing by an `action` string to small p
 handlers grouped by module (`auth.*`, `admin.*`, `registration.*`, `mess.*`,
 `accommodation.*`, `reports.*`). Every state-changing handler:
 
-1. Resolves the Bearer token → `{userId, role}`; rejects if missing/expired/invalid.
+1. Resolves the `sessionId` field carried in the request body → `{userId, role}`; rejects if
+   missing/expired/revoked (see §16 for why it's body-carried, not a header).
 2. Re-checks the caller's role is permitted for this action (server-side, independent of
    what the UI exposes — §6/§7/§8 restrictions of the original prompt are backend-enforced).
 3. Validates the payload shape and business preconditions (e.g. NOC granted before security
@@ -500,6 +505,42 @@ built on top of it?
    discarded (or kept as a scratch file, clearly labeled, not shipped).
 
 This is executed immediately after this spec revision is committed, before Phase 1 begins.
+
+### POC findings (2026-08-17) — executed, results below
+
+A throwaway Apps Script Web App was deployed (`gcbhoranj@gmail.com`, standalone project,
+`access: ANYONE_ANONYMOUS`, deployed via `clasp`) and called from a real cross-origin browser
+page served on `localhost` (a stand-in for the eventual GitHub Pages origin) — not just curl,
+since only a real browser enforces CORS.
+
+**Results:**
+
+1. **GET requests work cleanly.** `Access-Control-Allow-Origin: *` is present on both hops of
+   Apps Script's response (the `script.google.com` → `script.googleusercontent.com` redirect
+   Apps Script always issues), and the browser fetch succeeded and read the JSON body. PASS.
+2. **Simple POST works cleanly** when sent with `Content-Type: text/plain` (a CORS-safelisted
+   content type, so no preflight) and the payload — including the session credential — as a
+   JSON string in the body, parsed server-side with `JSON.parse(e.postData.contents)`. PASS.
+3. **POST with a custom `Authorization` header fails.** This header forces the browser to send
+   a CORS preflight `OPTIONS` request first. Apps Script Web Apps have no way to handle
+   `doOptions` with proper CORS headers — the preflight itself came back as a raw `500`
+   error page (confirmed independently via curl), so the browser blocks the real request
+   before it's ever sent. FAIL, as anticipated.
+
+**Bonus finding, independent of CORS:** Apps Script's `doGet`/`doPost` handlers do not expose
+incoming HTTP request headers at all (there is no `e.headers` or equivalent) — so even if a
+custom header's preflight *did* succeed, the backend would have no way to read it. This is a
+second, independent reason the session credential must travel in the request body, not a
+header.
+
+**Decision (binding, supersedes the "Bearer header" phrasing in §3):** the PWA sends the
+session credential as a field in the JSON body of a `text/plain`-content-typed POST (or as a
+URL query parameter for pure reads), never as an `Authorization` header. No proxy, gateway, or
+additional component is introduced — the direct PWA → Apps Script architecture from §2 stands
+unchanged; only the transport detail for the credential changes. The throwaway script and
+local test page were discarded after the test (the disposable Sheet/Script under
+`gcbhoranj@gmail.com` may still show in Drive/Apps Script listings — safe to delete manually,
+non-blocking).
 
 ## 17. Phase decomposition & build order
 
