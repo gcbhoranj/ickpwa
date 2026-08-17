@@ -252,6 +252,34 @@ function test_bootstrap_actionsRequireAdmin() {
   assertTrue_(threw1, 'requireRole_ sanity check failed');
 }
 
+function test_sheetHelpers_findRowsByField() {
+  ensureSheet_('SETTINGS');
+  const marker = '__TEST_FINDBY_' + new Date().getTime();
+  const keyA = marker + '_A';
+  const keyB = marker + '_B';
+  try {
+    setSetting_(keyA, 'x', 'test-runner');
+    setSetting_(keyB, 'x', 'test-runner');
+    const matches = findRowsByField_('SETTINGS', 'Value', 'x').filter(function (r) {
+      return r.Key === keyA || r.Key === keyB;
+    });
+    assertEqual_(matches.length, 2, 'findRowsByField_ did not find both matching rows');
+    const none = findRowsByField_('SETTINGS', 'Key', '__NEVER_EXISTS__');
+    assertEqual_(none.length, 0, 'findRowsByField_ should return empty array for no match, not null');
+  } finally {
+    deleteRowById_('SETTINGS', 'Key', keyA);
+    deleteRowById_('SETTINGS', 'Key', keyB);
+  }
+}
+
+function test_idGenerator_nextDocumentNumber() {
+  const first = nextDocumentNumber_('Registration');
+  const second = nextDocumentNumber_('Registration');
+  assertTrue_(first !== second, 'nextDocumentNumber_ produced a duplicate');
+  const prefix = getSetting_('Numbering_Registration_Prefix', '');
+  assertTrue_(first.indexOf(prefix) === 0, 'document number does not start with the configured prefix: ' + first);
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -264,7 +292,9 @@ const TEST_CASES = [
   { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness },
   { name: 'auth_listUsers_excludesSecretsAndGatesRole', fn: test_auth_listUsers_excludesSecretsAndGatesRole },
   { name: 'auth_setUserActive_togglesAndGuardsLastAdmin', fn: test_auth_setUserActive_togglesAndGuardsLastAdmin },
-  { name: 'bootstrap_actionsRequireAdmin', fn: test_bootstrap_actionsRequireAdmin }
+  { name: 'bootstrap_actionsRequireAdmin', fn: test_bootstrap_actionsRequireAdmin },
+  { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
+  { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber }
 ];
 
 function runAllTests_() {

@@ -113,6 +113,10 @@ function updateRowById_(sheetName, idColumn, idValue, patch) {
   return merged;
 }
 
+function findRowsByField_(sheetName, fieldName, value) {
+  return rowsToObjects_(sheetName).filter(function (row) { return row[fieldName] === value; });
+}
+
 // TEST-FIXTURE CLEANUP ONLY. Production handlers must never call this — transaction/config
 // tabs are append-only per the spec (§5, §78 of the original prompt).
 function deleteRowById_(sheetName, idColumn, idValue) {
