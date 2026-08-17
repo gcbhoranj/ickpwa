@@ -1,7 +1,11 @@
-const CACHE_NAME = 'hpuick-shell-v1';
+// Bump CACHE_NAME whenever any cached frontend file changes — the service worker only
+// re-installs (and re-fetches SHELL_FILES) when this file's own bytes change, so a stale
+// version number here means returning users keep getting the old app shell forever. See
+// README.md "Known Gotchas". Bumped to v2 for Phase 2 (added js/users.js, css/app.css changes).
+const CACHE_NAME = 'hpuick-shell-v2';
 const SHELL_FILES = [
-  './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/app.js',
-  './manifest.json', './icons/icon-192.png', './icons/icon-512.png'
+  './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
+  './js/app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
 self.addEventListener('install', function (event) {
