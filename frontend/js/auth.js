@@ -7,7 +7,7 @@ async function login(identifier, password) {
 }
 
 async function logout() {
-  try { await apiCall('auth.logout', {}); } finally { clearStoredSession(); }
+  try { await apiCall('auth.logout', {}); } catch (e) { /* session already invalid server-side, ignore */ } finally { clearStoredSession(); }
 }
 
 async function restoreSession() {

@@ -19,7 +19,7 @@ function seedFirstAdmin_(name, email, password) {
   const now = new Date().toISOString();
   appendRow_('USERS', {
     UserId: userId, Name: name, Email: email, LoginId: '', Role: ROLES.ADMIN,
-    PasswordHash: hashPassword_(password, salt), PasswordSalt: salt, Active: true,
+    PasswordHash: hashPassword_(password, salt), PasswordSalt: salt, Active: 'true',
     CreatedDate: now, LastLoginAt: '', CreatedBy: 'setup', CreatedAt: now,
     UpdatedBy: 'setup', UpdatedAt: now
   });

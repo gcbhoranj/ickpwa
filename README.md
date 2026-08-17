@@ -16,3 +16,18 @@ Tournament management PWA for Government College Bhoranj (Tarkwari), 21–25 Sep
 
 See the spec for full architecture, schema, and business rules; see
 `docs/superpowers/dev-log.md` for what's actually been built so far.
+
+## Known Gotchas
+
+- **Manual OAuth re-authorization.** Whenever new Apps Script code starts using a Google
+  service scope for the first time (e.g. `DriveApp`, `GmailApp`, `SlidesApp` in later phases)
+  that the deployed Web App hasn't used before, Google requires a one-time manual
+  authorization: open the script editor
+  (`https://script.google.com/d/1TFgSbzpfbKuvgtyPwrfB5Rui4Cvrs3n5DnzirXy1vwMLC6meHJRove4f/edit`)
+  as the script owner, run any function that touches the new scope, and click through the
+  consent dialog. This happened twice during Phase 1 (once for Sheets, once for Drive) and
+  will likely happen again when Phase 4 adds Gmail/Slides.
+- **Service worker cache versioning.** `frontend/service-worker.js`'s `CACHE_NAME` constant
+  must be bumped (e.g. `hpuick-shell-v2`, `v3`, ...) whenever any cached frontend file
+  changes, or returning users will keep serving a stale cached app shell indefinitely — the
+  service worker only re-fetches when browsers detect `service-worker.js` itself changed.

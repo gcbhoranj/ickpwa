@@ -85,19 +85,20 @@ function test_auth_passwordHashing() {
 
 function test_auth_sessionLifecycle() {
   const created = createSession_('USR-TEST', ROLES.ADMIN);
-  assertTrue_(!!created.sessionId, 'createSession_ did not return a sessionId');
+  try {
+    assertTrue_(!!created.sessionId, 'createSession_ did not return a sessionId');
 
-  const validated = validateSession_(created.sessionId);
-  assertEqual_(validated.userId, 'USR-TEST', 'validateSession_ returned wrong userId');
-  assertEqual_(validated.role, ROLES.ADMIN, 'validateSession_ returned wrong role');
+    const validated = validateSession_(created.sessionId);
+    assertEqual_(validated.userId, 'USR-TEST', 'validateSession_ returned wrong userId');
+    assertEqual_(validated.role, ROLES.ADMIN, 'validateSession_ returned wrong role');
 
-  revokeSession_(created.sessionId);
-  assertEqual_(validateSession_(created.sessionId), null, 'revoked session still validates');
+    revokeSession_(created.sessionId);
+    assertEqual_(validateSession_(created.sessionId), null, 'revoked session still validates');
 
-  assertEqual_(validateSession_('not-a-real-session-id'), null, 'unknown session did not return null');
-
-  // cleanup
-  deleteRowById_('SESSIONS', 'SessionId', created.sessionId);
+    assertEqual_(validateSession_('not-a-real-session-id'), null, 'unknown session did not return null');
+  } finally {
+    deleteRowById_('SESSIONS', 'SessionId', created.sessionId);
+  }
 }
 
 // Regression test for a real production bug: Sheets can silently rewrite a boolean cell's
@@ -106,17 +107,18 @@ function test_auth_sessionLifecycle() {
 // _findActiveUserByIdentifier_ must recognize both representations.
 function test_auth_findActiveUser_handlesStringBooleanActive() {
   const testEmail = '__test_active_flag_' + new Date().getTime() + '@example.com';
+  const testUserId = 'USR-TESTACTIVE-' + new Date().getTime();
   appendRow_('USERS', {
-    UserId: 'USR-TESTACTIVE', Name: 'Test', Email: testEmail, LoginId: '', Role: ROLES.ADMIN,
+    UserId: testUserId, Name: 'Test', Email: testEmail, LoginId: '', Role: ROLES.MESS,
     PasswordHash: '', PasswordSalt: '', Active: 'true', CreatedDate: '', LastLoginAt: '',
     CreatedBy: 'test-runner', CreatedAt: '', UpdatedBy: 'test-runner', UpdatedAt: ''
   });
   try {
     const found = _findActiveUserByIdentifier_(testEmail);
     assertTrue_(!!found, '_findActiveUserByIdentifier_ did not find a user with string "true" Active');
-    assertEqual_(found.UserId, 'USR-TESTACTIVE', 'found the wrong user');
+    assertEqual_(found.UserId, testUserId, 'found the wrong user');
   } finally {
-    deleteRowById_('USERS', 'UserId', 'USR-TESTACTIVE');
+    deleteRowById_('USERS', 'UserId', testUserId);
   }
 }
 

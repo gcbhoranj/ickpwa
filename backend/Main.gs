@@ -36,6 +36,9 @@ const ACTIONS = {
     return { pong: true, serverTime: new Date().toISOString() };
   },
   'system.selfTest': function () {
+    if (getSetting_('AllowSelfTest', 'false') !== 'true') {
+      throw apiError_('FORBIDDEN', 'Self-test is disabled.');
+    }
     return runAllTests_();
   },
   'admin.bootstrap.setupSchema': function () {
