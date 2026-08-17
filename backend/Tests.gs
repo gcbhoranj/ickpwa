@@ -16,8 +16,23 @@ function assertTrue_(condition, message) {
   }
 }
 
+function test_sheetHelpers_appendFindUpdateDelete() {
+  ensureSheet_('SETTINGS'); // SETTINGS is always safe to touch; used as the scratch sheet
+  const testKey = '__TEST_KEY_' + new Date().getTime();
+  setSetting_(testKey, 'v1', 'test-runner');
+  assertEqual_(getSetting_(testKey, null), 'v1', 'initial set failed');
+  setSetting_(testKey, 'v2', 'test-runner');
+  assertEqual_(getSetting_(testKey, null), 'v2', 'upsert (update) failed');
+  assertEqual_(getSetting_('__NEVER_SET__', 'fallback'), 'fallback', 'default value failed');
+  // cleanup: remove the scratch row so SETTINGS stays clean
+  deleteRowById_('SETTINGS', 'Key', testKey);
+  assertEqual_(getSetting_(testKey, null), null, 'cleanup delete failed');
+}
+
 // Each task appends its own test_xxx function and registers it here.
-const TEST_CASES = [];
+const TEST_CASES = [
+  { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete }
+];
 
 function runAllTests_() {
   const results = TEST_CASES.map(function (testCase) {
