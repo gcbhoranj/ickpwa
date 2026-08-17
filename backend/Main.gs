@@ -96,6 +96,10 @@ const ACTIONS = {
   'registration.team.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);
+  },
+  'registration.charges.calculate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return calculateCharges_(session, payload.teamId);
   }
 };
 

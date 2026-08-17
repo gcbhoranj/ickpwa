@@ -370,6 +370,41 @@ function test_registration_registerTeam_validationAndCreation() {
   }
 }
 
+function test_registration_calculateCharges_correctAndIdempotentGuard() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Charge Test College', 'District', 10, [
+      { name: 'Incharge A', isPrimary: true }
+    ]);
+    createdTeamId = team.teamId;
+
+    const rateDari = Number(getSetting_('RateDari', '0'));
+    const security = Number(getSetting_('SecurityAmount', '0'));
+
+    const charges = calculateCharges_(regSession, createdTeamId);
+    assertEqual_(charges.totalContingentPersons, 11, 'expected 10 members + 1 incharge = 11');
+    assertEqual_(charges.dariCharges, rateDari * 11, 'dari charges miscalculated');
+    assertEqual_(charges.securityCharges, security, 'security should be flat, not multiplied by headcount');
+    assertEqual_(charges.totalPayable, (rateDari * 11) + security, 'total payable miscalculated');
+
+    let threwDuplicate = false;
+    try {
+      calculateCharges_(regSession, createdTeamId);
+    } catch (err) {
+      threwDuplicate = true;
+      assertEqual_(err.code, 'ALREADY_CALCULATED', 'wrong error code for duplicate charge calculation');
+    }
+    assertTrue_(threwDuplicate, 'calculateCharges_ did not guard against being called twice for the same team');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -386,7 +421,8 @@ const TEST_CASES = [
   { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
   { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
-  { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation }
+  { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
+  { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard }
 ];
 
 function runAllTests_() {

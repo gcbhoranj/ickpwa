@@ -40,3 +40,36 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
 
   return { teamId: teamId, registrationNumber: registrationNumber, totalContingentPersons: totalContingent };
 }
+
+function calculateCharges_(actorSession, teamId) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
+  const existing = findRowsByField_('CHARGES', 'TeamId', teamId);
+  if (existing.length > 0) {
+    throw apiError_('ALREADY_CALCULATED', 'Charges have already been calculated for this team.');
+  }
+
+  const rateDari = Number(getSetting_('RateDari', '0'));
+  const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
+  const rateLunch = Number(getSetting_('RateLunch', '0'));
+  const rateDinner = Number(getSetting_('RateDinner', '0'));
+  const securityAmount = Number(getSetting_('SecurityAmount', '0'));
+
+  const dariCharges = rateDari * Number(team.values.TotalContingentPersons);
+  const totalPayable = dariCharges + securityAmount;
+  const chargeId = nextId_('CHG', 4);
+  const now = new Date().toISOString();
+
+  appendRow_('CHARGES', {
+    ChargeId: chargeId, TeamId: teamId, RateBreakfastSnapshot: rateBreakfast, RateLunchSnapshot: rateLunch,
+    RateDinnerSnapshot: rateDinner, RateDariSnapshot: rateDari, SecurityAmountSnapshot: securityAmount,
+    DariCharges: dariCharges, MealCharges: 0, SecurityCharges: securityAmount, TotalPayable: totalPayable,
+    CalculatedAt: now, CreatedBy: actorSession.userId
+  });
+
+  return {
+    chargeId: chargeId, dariCharges: dariCharges, securityCharges: securityAmount, totalPayable: totalPayable,
+    totalContingentPersons: Number(team.values.TotalContingentPersons)
+  };
+}
