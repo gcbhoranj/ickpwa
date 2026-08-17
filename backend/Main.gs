@@ -80,6 +80,18 @@ const ACTIONS = {
   'admin.users.setActive': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return setUserActive_(session, payload.userId, !!payload.active);
+  },
+  'admin.settings.updateRates': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return updateRates_(session, payload);
+  },
+  'admin.settings.setFinancialLock': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return setFinancialLock_(session, !!payload.locked);
+  },
+  'settings.getRegistrationInfo': function (payload, sessionId) {
+    requireSession_(sessionId);
+    return getRegistrationInfo_(null);
   }
 };
 

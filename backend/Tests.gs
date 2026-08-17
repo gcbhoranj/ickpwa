@@ -280,6 +280,53 @@ function test_idGenerator_nextDocumentNumber() {
   assertTrue_(first.indexOf(prefix) === 0, 'document number does not start with the configured prefix: ' + first);
 }
 
+function test_settings_updateRatesAndLock() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+
+  const before = getRegistrationInfo_(adminSession);
+  assertTrue_(before.hasOwnProperty('rateDari'), 'getRegistrationInfo_ missing rateDari');
+  assertTrue_(before.hasOwnProperty('financialSettingsLocked'), 'getRegistrationInfo_ missing financialSettingsLocked');
+
+  // non-admin cannot update rates
+  let threwForbidden = false;
+  try {
+    updateRates_(messSession, { breakfast: 50, lunch: 100, dinner: 100, dari: 100, security: 0 });
+  } catch (err) {
+    threwForbidden = true;
+    assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin rate update');
+  }
+  assertTrue_(threwForbidden, 'updateRates_ did not reject a non-admin caller');
+
+  // admin can update rates when unlocked (restore original values afterward)
+  const original = {
+    breakfast: before.rateBreakfast, lunch: before.rateLunch, dinner: before.rateDinner,
+    dari: before.rateDari, security: before.securityAmount
+  };
+  try {
+    updateRates_(adminSession, { breakfast: 51, lunch: 100, dinner: 100, dari: 100, security: 0 });
+    const after = getRegistrationInfo_(adminSession);
+    assertEqual_(after.rateBreakfast, '51', 'rate update did not take effect');
+  } finally {
+    updateRates_(adminSession, {
+      breakfast: original.breakfast, lunch: original.lunch, dinner: original.dinner,
+      dari: original.dari, security: original.security
+    });
+  }
+
+  // locking blocks further updates, then unlock restores ability
+  setFinancialLock_(adminSession, true);
+  let threwLocked = false;
+  try {
+    updateRates_(adminSession, { breakfast: 999, lunch: 100, dinner: 100, dari: 100, security: 0 });
+  } catch (err) {
+    threwLocked = true;
+    assertEqual_(err.code, 'SETTINGS_LOCKED', 'wrong error code for locked rate update');
+  }
+  assertTrue_(threwLocked, 'updateRates_ did not respect the financial lock');
+  setFinancialLock_(adminSession, false); // restore unlocked state for later tasks/tests
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -294,7 +341,8 @@ const TEST_CASES = [
   { name: 'auth_setUserActive_togglesAndGuardsLastAdmin', fn: test_auth_setUserActive_togglesAndGuardsLastAdmin },
   { name: 'bootstrap_actionsRequireAdmin', fn: test_bootstrap_actionsRequireAdmin },
   { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
-  { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber }
+  { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
+  { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock }
 ];
 
 function runAllTests_() {
