@@ -49,6 +49,19 @@ const ACTIONS = {
   },
   'admin.bootstrap.seedFirstAdmin': function (payload) {
     return seedFirstAdmin_(payload.name, payload.email, payload.password);
+  },
+  'auth.login': function (payload) {
+    return handleLogin_(payload.identifier, payload.password);
+  },
+  'auth.logout': function (payload, sessionId) {
+    requireSession_(sessionId);
+    revokeSession_(sessionId);
+    return { loggedOut: true };
+  },
+  'auth.whoami': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    const user = findRowById_('USERS', 'UserId', session.userId).values;
+    return { userId: user.UserId, name: user.Name, role: user.Role, email: user.Email, loginId: user.LoginId };
   }
 };
 

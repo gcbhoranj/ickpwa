@@ -83,12 +83,30 @@ function test_auth_passwordHashing() {
   assertTrue_(salt !== otherSalt, 'generateSalt_ produced a duplicate');
 }
 
+function test_auth_sessionLifecycle() {
+  const created = createSession_('USR-TEST', ROLES.ADMIN);
+  assertTrue_(!!created.sessionId, 'createSession_ did not return a sessionId');
+
+  const validated = validateSession_(created.sessionId);
+  assertEqual_(validated.userId, 'USR-TEST', 'validateSession_ returned wrong userId');
+  assertEqual_(validated.role, ROLES.ADMIN, 'validateSession_ returned wrong role');
+
+  revokeSession_(created.sessionId);
+  assertEqual_(validateSession_(created.sessionId), null, 'revoked session still validates');
+
+  assertEqual_(validateSession_('not-a-real-session-id'), null, 'unknown session did not return null');
+
+  // cleanup
+  deleteRowById_('SESSIONS', 'SessionId', created.sessionId);
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
   { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent },
   { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique },
-  { name: 'auth_passwordHashing', fn: test_auth_passwordHashing }
+  { name: 'auth_passwordHashing', fn: test_auth_passwordHashing },
+  { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle }
 ];
 
 function runAllTests_() {

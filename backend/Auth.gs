@@ -25,3 +25,69 @@ function seedFirstAdmin_(name, email, password) {
   });
   return { userId: userId, email: email };
 }
+
+const SESSION_DURATION_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+function createSession_(userId, role) {
+  const sessionId = Utilities.getUuid() + '-' + Utilities.getUuid();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_DURATION_MS).toISOString();
+  appendRow_('SESSIONS', {
+    SessionId: sessionId, UserId: userId, Role: role, IssuedAt: now.toISOString(),
+    ExpiresAt: expiresAt, Status: 'ACTIVE', LastSeenAt: now.toISOString()
+  });
+  return { sessionId: sessionId, expiresAt: expiresAt };
+}
+
+function validateSession_(sessionId) {
+  if (!sessionId) return null;
+  const found = findRowById_('SESSIONS', 'SessionId', sessionId);
+  if (!found) return null;
+  if (found.values.Status !== 'ACTIVE') return null;
+  if (new Date(found.values.ExpiresAt).getTime() < Date.now()) return null;
+  return { userId: found.values.UserId, role: found.values.Role, sessionId: sessionId };
+}
+
+function revokeSession_(sessionId) {
+  const found = findRowById_('SESSIONS', 'SessionId', sessionId);
+  if (found) updateRowById_('SESSIONS', 'SessionId', sessionId, { Status: 'REVOKED' });
+}
+
+function requireSession_(sessionId) {
+  const session = validateSession_(sessionId);
+  if (!session) throw apiError_('UNAUTHORIZED', 'Session is missing, expired, or revoked.');
+  return session;
+}
+
+function _findActiveUserByIdentifier_(identifier) {
+  const users = rowsToObjects_('USERS');
+  return users.find(function (u) {
+    return u.Active === true && (u.Email === identifier || u.LoginId === identifier);
+  }) || null;
+}
+
+function handleLogin_(identifier, password) {
+  const user = _findActiveUserByIdentifier_(identifier);
+  const now = new Date().toISOString();
+  if (!user) {
+    appendRow_('LOGIN_LOG', { LogId: nextId_('LOG', 6), Attempted: identifier, Result: 'FAIL_UNKNOWN', Timestamp: now });
+    throw apiError_('INVALID_CREDENTIALS', 'Incorrect login ID/email or password.');
+  }
+  const expectedHash = hashPassword_(password, user.PasswordSalt);
+  if (expectedHash !== user.PasswordHash) {
+    appendRow_('LOGIN_LOG', { LogId: nextId_('LOG', 6), Attempted: identifier, Result: 'FAIL_PASSWORD', Timestamp: now });
+    throw apiError_('INVALID_CREDENTIALS', 'Incorrect login ID/email or password.');
+  }
+  const session = createSession_(user.UserId, user.Role);
+  updateRowById_('USERS', 'UserId', user.UserId, { LastLoginAt: now });
+  appendRow_('LOGIN_LOG', { LogId: nextId_('LOG', 6), Attempted: identifier, Result: 'SUCCESS', Timestamp: now });
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: user.UserId, Role: user.Role,
+    Action: 'LOGIN', Entity: 'SESSION', EntityId: session.sessionId, PreviousState: '', NewState: ''
+  });
+  return {
+    sessionId: session.sessionId,
+    expiresAt: session.expiresAt,
+    user: { userId: user.UserId, name: user.Name, role: user.Role }
+  };
+}
