@@ -59,10 +59,17 @@ function requireSession_(sessionId) {
   return session;
 }
 
+// Sheets can silently rewrite a boolean cell's stored value from the JS boolean `true`
+// to the string `"true"` when the row is rewritten in place (e.g. by updateRowById_ against
+// a plain-text-formatted cell). Compare loosely so both representations are recognized.
+function _isActiveFlag_(value) {
+  return value === true || value === 'true' || value === 'TRUE';
+}
+
 function _findActiveUserByIdentifier_(identifier) {
   const users = rowsToObjects_('USERS');
   return users.find(function (u) {
-    return u.Active === true && (u.Email === identifier || u.LoginId === identifier);
+    return _isActiveFlag_(u.Active) && (u.Email === identifier || u.LoginId === identifier);
   }) || null;
 }
 

@@ -100,13 +100,34 @@ function test_auth_sessionLifecycle() {
   deleteRowById_('SESSIONS', 'SessionId', created.sessionId);
 }
 
+// Regression test for a real production bug: Sheets can silently rewrite a boolean cell's
+// stored value from the JS boolean `true` to the string `"true"` when a row is rewritten in
+// place (observed via updateRowById_ against a plain-text-formatted USERS row after login).
+// _findActiveUserByIdentifier_ must recognize both representations.
+function test_auth_findActiveUser_handlesStringBooleanActive() {
+  const testEmail = '__test_active_flag_' + new Date().getTime() + '@example.com';
+  appendRow_('USERS', {
+    UserId: 'USR-TESTACTIVE', Name: 'Test', Email: testEmail, LoginId: '', Role: ROLES.ADMIN,
+    PasswordHash: '', PasswordSalt: '', Active: 'true', CreatedDate: '', LastLoginAt: '',
+    CreatedBy: 'test-runner', CreatedAt: '', UpdatedBy: 'test-runner', UpdatedAt: ''
+  });
+  try {
+    const found = _findActiveUserByIdentifier_(testEmail);
+    assertTrue_(!!found, '_findActiveUserByIdentifier_ did not find a user with string "true" Active');
+    assertEqual_(found.UserId, 'USR-TESTACTIVE', 'found the wrong user');
+  } finally {
+    deleteRowById_('USERS', 'UserId', 'USR-TESTACTIVE');
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
   { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent },
   { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique },
   { name: 'auth_passwordHashing', fn: test_auth_passwordHashing },
-  { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle }
+  { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle },
+  { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive }
 ];
 
 function runAllTests_() {
