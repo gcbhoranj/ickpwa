@@ -141,6 +141,53 @@ function test_auth_requireRole() {
   assertEqual_(requireRole_(messSession, [ROLES.ADMIN, ROLES.MESS]), messSession, 'role present in a multi-role allow-list should pass');
 }
 
+function test_auth_createUser_validationAndUniqueness() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const uniqueLoginId = 'TESTREG_' + new Date().getTime();
+  let createdUserId = null;
+  try {
+    const created = createUser_(adminSession, 'Test Reg User', ROLES.REGISTRATION, uniqueLoginId, '', 'testpass123');
+    createdUserId = created.userId;
+    assertEqual_(created.role, ROLES.REGISTRATION, 'created user role mismatch');
+    assertEqual_(created.loginId, uniqueLoginId, 'created user loginId mismatch');
+    assertTrue_(!created.password && !created.passwordHash, 'createUser_ must never return password/hash material');
+
+    // duplicate loginId must be rejected
+    let threwDuplicate = false;
+    try {
+      createUser_(adminSession, 'Another User', ROLES.MESS, uniqueLoginId, '', 'otherpass');
+    } catch (err) {
+      threwDuplicate = true;
+      assertEqual_(err.code, 'DUPLICATE_IDENTIFIER', 'wrong error code for duplicate loginId');
+    }
+    assertTrue_(threwDuplicate, 'createUser_ did not reject a duplicate loginId');
+
+    // invalid role must be rejected
+    let threwBadRole = false;
+    try {
+      createUser_(adminSession, 'Bad Role User', 'NOT_A_REAL_ROLE', 'TESTBAD_' + new Date().getTime(), '', 'pass');
+    } catch (err) {
+      threwBadRole = true;
+      assertEqual_(err.code, 'INVALID_ROLE', 'wrong error code for invalid role');
+    }
+    assertTrue_(threwBadRole, 'createUser_ did not reject an invalid role');
+
+    // non-admin caller must be rejected by requireRole_ before createUser_ logic even runs
+    const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+    let threwForbidden = false;
+    try {
+      requireRole_(messSession, [ROLES.ADMIN]);
+      createUser_(messSession, 'Should Not Get Here', ROLES.MESS, 'TESTNOPE_' + new Date().getTime(), '', 'pass');
+    } catch (err) {
+      threwForbidden = true;
+      assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin caller');
+    }
+    assertTrue_(threwForbidden, 'non-admin caller was not rejected');
+  } finally {
+    if (createdUserId) deleteRowById_('USERS', 'UserId', createdUserId);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -149,7 +196,8 @@ const TEST_CASES = [
   { name: 'auth_passwordHashing', fn: test_auth_passwordHashing },
   { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle },
   { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive },
-  { name: 'auth_requireRole', fn: test_auth_requireRole }
+  { name: 'auth_requireRole', fn: test_auth_requireRole },
+  { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness }
 ];
 
 function runAllTests_() {

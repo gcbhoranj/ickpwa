@@ -66,6 +66,42 @@ function requireRole_(session, allowedRoles) {
   return session;
 }
 
+function createUser_(actorSession, name, role, loginId, email, password) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+
+  if (!ROLES.hasOwnProperty(role)) {
+    throw apiError_('INVALID_ROLE', 'Role must be one of: ' + Object.keys(ROLES).join(', '));
+  }
+  if (role === ROLES.ADMIN) {
+    if (!email) throw apiError_('VALIDATION_ERROR', 'Admin accounts require an email address.');
+  } else {
+    if (!loginId) throw apiError_('VALIDATION_ERROR', 'Non-admin accounts require a Login ID.');
+  }
+
+  const existing = rowsToObjects_('USERS');
+  const identifierTaken = existing.some(function (u) {
+    return (loginId && u.LoginId === loginId) || (email && u.Email === email);
+  });
+  if (identifierTaken) {
+    throw apiError_('DUPLICATE_IDENTIFIER', 'That Login ID or email is already in use.');
+  }
+
+  const salt = generateSalt_();
+  const userId = nextId_('USR', 4);
+  const now = new Date().toISOString();
+  appendRow_('USERS', {
+    UserId: userId, Name: name, Email: email || '', LoginId: loginId || '', Role: role,
+    PasswordHash: hashPassword_(password, salt), PasswordSalt: salt, Active: 'true',
+    CreatedDate: now, LastLoginAt: '', CreatedBy: actorSession.userId, CreatedAt: now,
+    UpdatedBy: actorSession.userId, UpdatedAt: now
+  });
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'CREATE_USER', Entity: 'USER', EntityId: userId, PreviousState: '', NewState: role
+  });
+  return { userId: userId, name: name, role: role, loginId: loginId || '', email: email || '' };
+}
+
 // Sheets can silently rewrite a boolean cell's stored value from the JS boolean `true`
 // to the string `"true"` when the row is rewritten in place (e.g. by updateRowById_ against
 // a plain-text-formatted cell). Compare loosely so both representations are recognized.

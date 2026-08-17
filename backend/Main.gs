@@ -65,6 +65,10 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     const user = findRowById_('USERS', 'UserId', session.userId).values;
     return { userId: user.UserId, name: user.Name, role: user.Role, email: user.Email, loginId: user.LoginId };
+  },
+  'admin.users.create': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createUser_(session, payload.name, payload.role, payload.loginId, payload.email, payload.password);
   }
 };
 
