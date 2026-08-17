@@ -20,6 +20,11 @@ function ensureSheet_(name) {
   if (!headersMatch) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
+  // Format the data range as plain text to prevent Google Sheets from auto-converting
+  // strings that look like dates, booleans, or numbers. This ensures all cell values
+  // round-trip correctly through setValues/getValues without type coercion.
+  const dataRange = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), headers.length);
+  dataRange.setNumberFormat('@'); // '@' = plain text format
   return sheet;
 }
 
@@ -112,9 +117,12 @@ function deleteRowById_(sheetName, idColumn, idValue) {
 function getSetting_(key, defaultValue) {
   const found = findRowById_('SETTINGS', 'Key', key);
   if (found) {
-    const value = found.values.Value;
-    // Google Sheets may interpret string values like 'false' as booleans; ensure we return strings
-    return typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+    let value = found.values.Value;
+    // Remove leading apostrophe if present (used to force text storage in Sheets to prevent auto-type conversion)
+    if (typeof value === 'string' && value.charAt(0) === "'") {
+      value = value.substring(1);
+    }
+    return value;
   }
   return defaultValue;
 }
@@ -122,9 +130,13 @@ function getSetting_(key, defaultValue) {
 function setSetting_(key, value, actorId) {
   const found = findRowById_('SETTINGS', 'Key', key);
   const now = new Date().toISOString();
+  // Prefix value with apostrophe to force Google Sheets to store as text and prevent auto-conversion
+  // of values like 'false' to boolean or '2026-09-21' to date. getSetting_ will strip this prefix on read.
+  const textValue = "'" + String(value);
+
   if (found) {
-    updateRowById_('SETTINGS', 'Key', key, { Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
+    updateRowById_('SETTINGS', 'Key', key, { Value: textValue, UpdatedBy: actorId || 'system', UpdatedAt: now });
   } else {
-    appendRow_('SETTINGS', { Key: key, Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
+    appendRow_('SETTINGS', { Key: key, Value: textValue, UpdatedBy: actorId || 'system', UpdatedAt: now });
   }
 }

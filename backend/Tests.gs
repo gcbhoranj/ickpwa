@@ -35,10 +35,20 @@ function test_setup_schemaAndSettingsIdempotent() {
   const secondRun = setupSchema_(); // idempotency check
   assertEqual_(secondRun.length, firstRun.length, 'setupSchema_ not idempotent');
 
+  // Clear any corrupted settings data from before plain-text formatting was applied,
+  // then re-seed to ensure all values are stored correctly as text.
+  clearSettingsData_();
   seedSettings_();
+
   assertEqual_(getSetting_('FinancialSettingsLocked', null), 'false', 'default lock state missing');
   assertEqual_(getSetting_('Numbering_Receipt_Prefix', null), 'GCB/HPUICK/Receipt-', 'receipt prefix not seeded');
   assertEqual_(getSetting_('AllowSelfTest', null), 'true', 'AllowSelfTest not seeded');
+
+  // Test that ISO-date-shaped values round-trip correctly without Google Sheets type coercion.
+  // With plain-text formatting in place, TournamentStartDate='2026-09-21' and
+  // TournamentEndDate='2026-09-25' should be stored as literal strings, not auto-converted to Date objects.
+  assertEqual_(getSetting_('TournamentStartDate', null), '2026-09-21', 'TournamentStartDate corrupted by date auto-conversion');
+  assertEqual_(getSetting_('TournamentEndDate', null), '2026-09-25', 'TournamentEndDate corrupted by date auto-conversion');
 }
 
 // Each task appends its own test_xxx function and registers it here.
