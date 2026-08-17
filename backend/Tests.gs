@@ -58,10 +58,25 @@ function test_setup_schemaAndSettingsIdempotent() {
   assertEqual_(getSetting_(dateTestKey, null), null, 'cleanup delete failed');
 }
 
+function test_idGenerator_sequentialAndUnique() {
+  const ids = [];
+  for (let i = 0; i < 5; i++) ids.push(nextId_('TESTID', 4));
+  const unique = ids.filter(function (id, i) { return ids.indexOf(id) === i; });
+  assertEqual_(unique.length, 5, 'nextId_ produced duplicates: ' + ids.join(','));
+  assertTrue_(/^TESTID-\d{4}$/.test(ids[0]), 'unexpected ID format: ' + ids[0]);
+  // sequential: each numeric suffix is exactly one more than the previous
+  for (let i = 1; i < ids.length; i++) {
+    const prev = parseInt(ids[i - 1].split('-')[1], 10);
+    const curr = parseInt(ids[i].split('-')[1], 10);
+    assertEqual_(curr, prev + 1, 'IDs not sequential: ' + ids[i - 1] + ' -> ' + ids[i]);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
-  { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent }
+  { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent },
+  { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique }
 ];
 
 function runAllTests_() {
