@@ -48,6 +48,11 @@ function appendRow_(sheetName, obj) {
     return obj.hasOwnProperty(h) ? obj[h] : '';
   });
   sheet.appendRow(row);
+  // Format the newly-appended row as plain text to prevent Google Sheets from auto-converting
+  // string values like '2026-09-21' to dates or 'false' to booleans. Applied after append
+  // to ensure the row number is correct.
+  const newRowNum = sheet.getLastRow();
+  sheet.getRange(newRowNum, 1, 1, headers.length).setNumberFormat('@');
   return obj;
 }
 
@@ -101,6 +106,9 @@ function updateRowById_(sheetName, idColumn, idValue, patch) {
     }
   }
   const row = headers.map(function (h) { return merged[h]; });
+  // Format the row as plain text before writing to prevent Google Sheets from auto-converting
+  // string values like '2026-09-21' to dates or 'false' to booleans.
+  sheet.getRange(found.rowNumber, 1, 1, headers.length).setNumberFormat('@');
   sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([row]);
   return merged;
 }
@@ -122,18 +130,9 @@ function getSetting_(key, defaultValue) {
 function setSetting_(key, value, actorId) {
   const found = findRowById_('SETTINGS', 'Key', key);
   const now = new Date().toISOString();
-  const sheet = getSheet_('SETTINGS');
-  const headers = SHEET_SCHEMAS['SETTINGS'];
-  const valueColIndex = headers.indexOf('Value');
-
   if (found) {
-    // Format the Value cell as plain text right before updating (ensures '2026-09-21' stays text, not Date)
-    sheet.getRange(found.rowNumber, valueColIndex + 1).setNumberFormat('@');
     updateRowById_('SETTINGS', 'Key', key, { Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
   } else {
-    // Append the new row, then immediately format its Value cell as plain text
-    const newRowNum = sheet.getLastRow() + 1;
     appendRow_('SETTINGS', { Key: key, Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
-    sheet.getRange(newRowNum, valueColIndex + 1).setNumberFormat('@');
   }
 }

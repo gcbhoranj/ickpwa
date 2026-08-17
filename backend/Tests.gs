@@ -19,13 +19,16 @@ function assertTrue_(condition, message) {
 function test_sheetHelpers_appendFindUpdateDelete() {
   ensureSheet_('SETTINGS'); // SETTINGS is always safe to touch; used as the scratch sheet
   const testKey = '__TEST_KEY_' + new Date().getTime();
-  setSetting_(testKey, 'v1', 'test-runner');
-  assertEqual_(getSetting_(testKey, null), 'v1', 'initial set failed');
-  setSetting_(testKey, 'v2', 'test-runner');
-  assertEqual_(getSetting_(testKey, null), 'v2', 'upsert (update) failed');
-  assertEqual_(getSetting_('__NEVER_SET__', 'fallback'), 'fallback', 'default value failed');
-  // cleanup: remove the scratch row so SETTINGS stays clean
-  deleteRowById_('SETTINGS', 'Key', testKey);
+  try {
+    setSetting_(testKey, 'v1', 'test-runner');
+    assertEqual_(getSetting_(testKey, null), 'v1', 'initial set failed');
+    setSetting_(testKey, 'v2', 'test-runner');
+    assertEqual_(getSetting_(testKey, null), 'v2', 'upsert (update) failed');
+    assertEqual_(getSetting_('__NEVER_SET__', 'fallback'), 'fallback', 'default value failed');
+  } finally {
+    // cleanup: remove the scratch row so SETTINGS stays clean, even if an assertion fails
+    deleteRowById_('SETTINGS', 'Key', testKey);
+  }
   assertEqual_(getSetting_(testKey, null), null, 'cleanup delete failed');
 }
 
@@ -41,14 +44,17 @@ function test_setup_schemaAndSettingsIdempotent() {
   assertEqual_(getSetting_('AllowSelfTest', null), 'true', 'AllowSelfTest not seeded');
 
   // Test that ISO-date-shaped values round-trip correctly without Google Sheets type coercion.
-  // The plain-text formatting in ensureSheet_() prevents Sheets from auto-converting strings like
-  // '2026-09-21' to Date objects. Use a dedicated scratch key to verify this, then clean up.
+  // The plain-text formatting in appendRow_/updateRowById_ prevents Sheets from auto-converting
+  // strings like '2026-09-21' to Date objects. Use a dedicated scratch key to verify this, then clean up.
   ensureSheet_('SETTINGS');
   const dateTestKey = '__TEST_DATE_KEY_' + new Date().getTime();
-  setSetting_(dateTestKey, '2026-09-21', 'test-runner');
-  assertEqual_(getSetting_(dateTestKey, null), '2026-09-21', 'date-shaped value corrupted by Sheets auto-conversion');
-  // Cleanup: remove the scratch row so SETTINGS stays clean
-  deleteRowById_('SETTINGS', 'Key', dateTestKey);
+  try {
+    setSetting_(dateTestKey, '2026-09-21', 'test-runner');
+    assertEqual_(getSetting_(dateTestKey, null), '2026-09-21', 'date-shaped value corrupted by Sheets auto-conversion');
+  } finally {
+    // Cleanup: remove the scratch row so SETTINGS stays clean, even if an assertion fails
+    deleteRowById_('SETTINGS', 'Key', dateTestKey);
+  }
   assertEqual_(getSetting_(dateTestKey, null), null, 'cleanup delete failed');
 }
 
