@@ -46,6 +46,9 @@ const ACTIONS = {
   },
   'admin.bootstrap.setupDriveFolders': function () {
     return setupDriveFolders_();
+  },
+  'admin.bootstrap.seedFirstAdmin': function (payload) {
+    return seedFirstAdmin_(payload.name, payload.email, payload.password);
   }
 };
 

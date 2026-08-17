@@ -72,11 +72,23 @@ function test_idGenerator_sequentialAndUnique() {
   }
 }
 
+function test_auth_passwordHashing() {
+  const salt = generateSalt_();
+  const hash1 = hashPassword_('correct horse battery staple', salt);
+  const hash2 = hashPassword_('correct horse battery staple', salt);
+  assertEqual_(hash1, hash2, 'hashing is not deterministic for same password+salt');
+  const hash3 = hashPassword_('different password', salt);
+  assertTrue_(hash1 !== hash3, 'different passwords produced the same hash');
+  const otherSalt = generateSalt_();
+  assertTrue_(salt !== otherSalt, 'generateSalt_ produced a duplicate');
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
   { name: 'setup_schemaAndSettingsIdempotent', fn: test_setup_schemaAndSettingsIdempotent },
-  { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique }
+  { name: 'idGenerator_sequentialAndUnique', fn: test_idGenerator_sequentialAndUnique },
+  { name: 'auth_passwordHashing', fn: test_auth_passwordHashing }
 ];
 
 function runAllTests_() {
