@@ -73,6 +73,10 @@ const ACTIONS = {
   'admin.users.list': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return { users: listUsers_(session) };
+  },
+  'admin.users.setActive': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return setUserActive_(session, payload.userId, !!payload.active);
   }
 };
 

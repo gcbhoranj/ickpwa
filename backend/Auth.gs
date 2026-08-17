@@ -102,6 +102,32 @@ function createUser_(actorSession, name, role, loginId, email, password) {
   return { userId: userId, name: name, role: role, loginId: loginId || '', email: email || '' };
 }
 
+function setUserActive_(actorSession, userId, active) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  const target = findRowById_('USERS', 'UserId', userId);
+  if (!target) throw apiError_('NOT_FOUND', 'No such user: ' + userId);
+
+  if (target.values.Role === ROLES.ADMIN && active === false) {
+    const otherActiveAdmins = rowsToObjects_('USERS').filter(function (u) {
+      return u.Role === ROLES.ADMIN && _isActiveFlag_(u.Active) && u.UserId !== userId;
+    });
+    if (otherActiveAdmins.length === 0) {
+      throw apiError_('LAST_ADMIN', 'Cannot disable the only active Admin account.');
+    }
+  }
+
+  const now = new Date().toISOString();
+  updateRowById_('USERS', 'UserId', userId, {
+    Active: active ? 'true' : 'false', UpdatedBy: actorSession.userId, UpdatedAt: now
+  });
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: active ? 'ENABLE_USER' : 'DISABLE_USER', Entity: 'USER', EntityId: userId,
+    PreviousState: '', NewState: active ? 'true' : 'false'
+  });
+  return { userId: userId, active: active };
+}
+
 function listUsers_(actorSession) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   return rowsToObjects_('USERS').map(function (u) {

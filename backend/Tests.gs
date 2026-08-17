@@ -209,6 +209,42 @@ function test_auth_listUsers_excludesSecretsAndGatesRole() {
   assertTrue_(threw, 'listUsers_ did not reject a non-admin caller');
 }
 
+function test_auth_setUserActive_togglesAndGuardsLastAdmin() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const testLoginId = 'TESTTOGGLE_' + new Date().getTime();
+  let createdUserId = null;
+  try {
+    const created = createUser_(adminSession, 'Toggle Test User', ROLES.ACCOMMODATION, testLoginId, '', 'pass1234');
+    createdUserId = created.userId;
+
+    const disabled = setUserActive_(adminSession, createdUserId, false);
+    assertEqual_(disabled.active, false, 'setUserActive_ did not report disabled');
+    const afterDisable = findRowById_('USERS', 'UserId', createdUserId).values;
+    assertTrue_(!_isActiveFlag_(afterDisable.Active), 'user row was not actually disabled');
+
+    const reenabled = setUserActive_(adminSession, createdUserId, true);
+    assertEqual_(reenabled.active, true, 'setUserActive_ did not report re-enabled');
+    const afterEnable = findRowById_('USERS', 'UserId', createdUserId).values;
+    assertTrue_(_isActiveFlag_(afterEnable.Active), 'user row was not actually re-enabled');
+
+    // last-admin guard: the seeded admin (USR-0001) must be the only active admin right now
+    // in a correctly-running test suite; attempting to disable it must be rejected
+    let threwLastAdmin = false;
+    try {
+      setUserActive_(adminSession, 'USR-0001', false);
+    } catch (err) {
+      threwLastAdmin = true;
+      assertEqual_(err.code, 'LAST_ADMIN', 'wrong error code for last-admin disable attempt');
+    }
+    assertTrue_(threwLastAdmin, 'setUserActive_ did not guard against disabling the last active admin');
+    // confirm the guard actually left USR-0001 untouched
+    const stillActiveAdmin = findRowById_('USERS', 'UserId', 'USR-0001').values;
+    assertTrue_(_isActiveFlag_(stillActiveAdmin.Active), 'last-admin guard fired but the admin was disabled anyway');
+  } finally {
+    if (createdUserId) deleteRowById_('USERS', 'UserId', createdUserId);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -219,7 +255,8 @@ const TEST_CASES = [
   { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive },
   { name: 'auth_requireRole', fn: test_auth_requireRole },
   { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness },
-  { name: 'auth_listUsers_excludesSecretsAndGatesRole', fn: test_auth_listUsers_excludesSecretsAndGatesRole }
+  { name: 'auth_listUsers_excludesSecretsAndGatesRole', fn: test_auth_listUsers_excludesSecretsAndGatesRole },
+  { name: 'auth_setUserActive_togglesAndGuardsLastAdmin', fn: test_auth_setUserActive_togglesAndGuardsLastAdmin }
 ];
 
 function runAllTests_() {
