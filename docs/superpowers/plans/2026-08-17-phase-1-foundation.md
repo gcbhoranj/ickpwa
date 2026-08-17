@@ -1467,22 +1467,26 @@ unless they have GitHub Pro) — e.g. `hpuick-2026-frontend` — and share the r
 is safe here: the frontend contains no secrets, only the Web App URL, which enforces its own
 login (Task 6) regardless of who can see it.
 
-- [ ] **Step 2: Push the frontend folder to that repository**
+- [ ] **Step 2: Push the frontend folder to that repository via `git subtree`**
+
+`frontend/` is already tracked inside this project's own repo (committed in Task 7).
+**Do not `git init` inside `frontend/`** — that directory is not a fresh, untracked folder,
+so `git init` there would create a nested git repository inside an already-tracked one; the
+outer repo would then see `frontend/` as an embedded gitlink rather than plain files, and any
+later `git add frontend/` (e.g. Task 9) would silently stop tracking its contents. Instead,
+push the subdirectory's history to the new repo with `git subtree`, run from the **project
+root** (not from inside `frontend/`):
 
 ```bash
-cd "C:\Users\princ\Downloads\HPUICK\frontend"
-git init
-git add .
-git commit -m "Initial PWA shell for GitHub Pages"
-git branch -M main
-git remote add origin <REPO_URL_FROM_USER>
-git push -u origin main
+cd "C:\Users\princ\Downloads\HPUICK\.claude\worktrees\phase-1-foundation"
+git remote add frontend-origin <REPO_URL_FROM_USER>
+git subtree push --prefix=frontend frontend-origin main
 ```
 
-(The frontend gets its own small git history since it deploys independently to Pages; the
-main project repo keeps tracking `frontend/` too via the files already committed in Task 7 —
-both are fine to coexist, they just serve different purposes: one for Pages deployment, one
-for the project's own history.)
+(`frontend-origin` is a distinct remote name so it can't collide with a future `origin`
+remote for the main project repo, which doesn't have one yet either. This one `git subtree
+push` publishes only `frontend/`'s file contents, with no nested `.git` anywhere and no
+change to how the main repo tracks `frontend/`.)
 
 - [ ] **Step 3: Enable GitHub Pages**
 
