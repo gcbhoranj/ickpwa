@@ -73,3 +73,37 @@ function calculateCharges_(actorSession, teamId) {
     totalContingentPersons: Number(team.values.TotalContingentPersons)
   };
 }
+
+function recordPayment_(actorSession, teamId, mode) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  if (!mode) throw apiError_('VALIDATION_ERROR', 'Payment mode is required.');
+  const charges = findRowsByField_('CHARGES', 'TeamId', teamId);
+  if (charges.length === 0) throw apiError_('NOT_FOUND', 'Charges have not been calculated yet for this team.');
+  const charge = charges[0];
+
+  const existingPayments = findRowsByField_('PAYMENTS', 'TeamId', teamId).filter(function (p) { return p.Purpose === 'REGISTRATION_CHARGES'; });
+  if (existingPayments.length > 0) {
+    throw apiError_('ALREADY_PAID', 'Registration payment has already been recorded for this team.');
+  }
+
+  const now = new Date().toISOString();
+  const dariPaymentId = nextId_('PAY', 4);
+  appendRow_('PAYMENTS', {
+    PaymentId: dariPaymentId, TeamId: teamId, Amount: charge.DariCharges, Mode: mode, ReceivedAt: now,
+    Purpose: 'REGISTRATION_CHARGES', ReversalOf: '', CreatedBy: actorSession.userId, CreatedAt: now
+  });
+  const securityPaymentId = nextId_('PAY', 4);
+  appendRow_('PAYMENTS', {
+    PaymentId: securityPaymentId, TeamId: teamId, Amount: charge.SecurityCharges, Mode: mode, ReceivedAt: now,
+    Purpose: 'SECURITY', ReversalOf: '', CreatedBy: actorSession.userId, CreatedAt: now
+  });
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'RECORD_PAYMENT', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: mode
+  });
+
+  return {
+    dariPaymentId: dariPaymentId, securityPaymentId: securityPaymentId,
+    totalReceived: Number(charge.DariCharges) + Number(charge.SecurityCharges)
+  };
+}

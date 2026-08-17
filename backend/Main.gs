@@ -100,6 +100,10 @@ const ACTIONS = {
   'registration.charges.calculate': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return calculateCharges_(session, payload.teamId);
+  },
+  'registration.payment.record': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return recordPayment_(session, payload.teamId, payload.mode);
   }
 };
 

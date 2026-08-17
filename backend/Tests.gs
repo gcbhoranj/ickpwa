@@ -405,6 +405,42 @@ function test_registration_calculateCharges_correctAndIdempotentGuard() {
   }
 }
 
+function test_registration_recordPayment_createsTwoRowsAndGuards() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Payment Test College', 'District', 8, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    const charges = calculateCharges_(regSession, createdTeamId);
+
+    const payment = recordPayment_(regSession, createdTeamId, 'Cash');
+    assertEqual_(payment.totalReceived, charges.totalPayable, 'recorded payment total does not match calculated charges');
+
+    const rows = findRowsByField_('PAYMENTS', 'TeamId', createdTeamId);
+    assertEqual_(rows.length, 2, 'expected exactly 2 payment rows (charges + security)');
+    const chargeRow = rows.filter(function (r) { return r.Purpose === 'REGISTRATION_CHARGES'; })[0];
+    const securityRow = rows.filter(function (r) { return r.Purpose === 'SECURITY'; })[0];
+    assertEqual_(Number(chargeRow.Amount), charges.dariCharges, 'REGISTRATION_CHARGES payment amount mismatch');
+    assertEqual_(Number(securityRow.Amount), charges.securityCharges, 'SECURITY payment amount mismatch');
+
+    let threwDuplicate = false;
+    try {
+      recordPayment_(regSession, createdTeamId, 'Cash');
+    } catch (err) {
+      threwDuplicate = true;
+      assertEqual_(err.code, 'ALREADY_PAID', 'wrong error code for duplicate payment recording');
+    }
+    assertTrue_(threwDuplicate, 'recordPayment_ did not guard against being called twice for the same team');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -422,7 +458,8 @@ const TEST_CASES = [
   { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
-  { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard }
+  { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
+  { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards }
 ];
 
 function runAllTests_() {
