@@ -69,6 +69,10 @@ const ACTIONS = {
   'admin.users.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return createUser_(session, payload.name, payload.role, payload.loginId, payload.email, payload.password);
+  },
+  'admin.users.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { users: listUsers_(session) };
   }
 };
 

@@ -102,6 +102,16 @@ function createUser_(actorSession, name, role, loginId, email, password) {
   return { userId: userId, name: name, role: role, loginId: loginId || '', email: email || '' };
 }
 
+function listUsers_(actorSession) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  return rowsToObjects_('USERS').map(function (u) {
+    return {
+      userId: u.UserId, name: u.Name, email: u.Email, loginId: u.LoginId, role: u.Role,
+      active: _isActiveFlag_(u.Active), createdDate: u.CreatedDate, lastLoginAt: u.LastLoginAt
+    };
+  });
+}
+
 // Sheets can silently rewrite a boolean cell's stored value from the JS boolean `true`
 // to the string `"true"` when the row is rewritten in place (e.g. by updateRowById_ against
 // a plain-text-formatted cell). Compare loosely so both representations are recognized.

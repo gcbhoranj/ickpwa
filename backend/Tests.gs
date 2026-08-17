@@ -188,6 +188,27 @@ function test_auth_createUser_validationAndUniqueness() {
   }
 }
 
+function test_auth_listUsers_excludesSecretsAndGatesRole() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const users = listUsers_(adminSession);
+  assertTrue_(Array.isArray(users), 'listUsers_ must return an array');
+  assertTrue_(users.length >= 1, 'listUsers_ should include at least the seeded admin');
+  users.forEach(function (u) {
+    assertTrue_(!u.hasOwnProperty('passwordHash') && !u.hasOwnProperty('PasswordHash'), 'listUsers_ leaked a password hash');
+    assertTrue_(!u.hasOwnProperty('passwordSalt') && !u.hasOwnProperty('PasswordSalt'), 'listUsers_ leaked a password salt');
+  });
+
+  const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+  let threw = false;
+  try {
+    listUsers_(messSession);
+  } catch (err) {
+    threw = true;
+    assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin caller');
+  }
+  assertTrue_(threw, 'listUsers_ did not reject a non-admin caller');
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -197,7 +218,8 @@ const TEST_CASES = [
   { name: 'auth_sessionLifecycle', fn: test_auth_sessionLifecycle },
   { name: 'auth_findActiveUser_handlesStringBooleanActive', fn: test_auth_findActiveUser_handlesStringBooleanActive },
   { name: 'auth_requireRole', fn: test_auth_requireRole },
-  { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness }
+  { name: 'auth_createUser_validationAndUniqueness', fn: test_auth_createUser_validationAndUniqueness },
+  { name: 'auth_listUsers_excludesSecretsAndGatesRole', fn: test_auth_listUsers_excludesSecretsAndGatesRole }
 ];
 
 function runAllTests_() {
