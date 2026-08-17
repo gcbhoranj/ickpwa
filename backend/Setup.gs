@@ -90,3 +90,11 @@ function setupDriveFolders_() {
   Object.keys(structure).forEach(function (key) { folderIds[key] = structure[key].getId(); });
   return { rootFolderId: root.getId(), folders: folderIds };
 }
+
+// Temporary manual-run wrapper so the script owner can trigger the Drive OAuth
+// consent screen from the Apps Script editor's Run dropdown. NOT exposed via
+// the public web API (not registered in Main.gs's ACTIONS table). Safe to
+// remove/disable after the one-time authorization is done.
+function authorizeDriveManually() {
+  return setupDriveFolders_();
+}
