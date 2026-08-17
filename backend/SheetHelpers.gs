@@ -116,27 +116,24 @@ function deleteRowById_(sheetName, idColumn, idValue) {
 
 function getSetting_(key, defaultValue) {
   const found = findRowById_('SETTINGS', 'Key', key);
-  if (found) {
-    let value = found.values.Value;
-    // Remove leading apostrophe if present (used to force text storage in Sheets to prevent auto-type conversion)
-    if (typeof value === 'string' && value.charAt(0) === "'") {
-      value = value.substring(1);
-    }
-    return value;
-  }
-  return defaultValue;
+  return found ? found.values.Value : defaultValue;
 }
 
 function setSetting_(key, value, actorId) {
   const found = findRowById_('SETTINGS', 'Key', key);
   const now = new Date().toISOString();
-  // Prefix value with apostrophe to force Google Sheets to store as text and prevent auto-conversion
-  // of values like 'false' to boolean or '2026-09-21' to date. getSetting_ will strip this prefix on read.
-  const textValue = "'" + String(value);
+  const sheet = getSheet_('SETTINGS');
+  const headers = SHEET_SCHEMAS['SETTINGS'];
+  const valueColIndex = headers.indexOf('Value');
 
   if (found) {
-    updateRowById_('SETTINGS', 'Key', key, { Value: textValue, UpdatedBy: actorId || 'system', UpdatedAt: now });
+    // Format the Value cell as plain text right before updating (ensures '2026-09-21' stays text, not Date)
+    sheet.getRange(found.rowNumber, valueColIndex + 1).setNumberFormat('@');
+    updateRowById_('SETTINGS', 'Key', key, { Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
   } else {
-    appendRow_('SETTINGS', { Key: key, Value: textValue, UpdatedBy: actorId || 'system', UpdatedAt: now });
+    // Append the new row, then immediately format its Value cell as plain text
+    const newRowNum = sheet.getLastRow() + 1;
+    appendRow_('SETTINGS', { Key: key, Value: value, UpdatedBy: actorId || 'system', UpdatedAt: now });
+    sheet.getRange(newRowNum, valueColIndex + 1).setNumberFormat('@');
   }
 }

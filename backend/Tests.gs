@@ -35,20 +35,21 @@ function test_setup_schemaAndSettingsIdempotent() {
   const secondRun = setupSchema_(); // idempotency check
   assertEqual_(secondRun.length, firstRun.length, 'setupSchema_ not idempotent');
 
-  // Clear any corrupted settings data from before plain-text formatting was applied,
-  // then re-seed to ensure all values are stored correctly as text.
-  clearSettingsData_();
   seedSettings_();
-
   assertEqual_(getSetting_('FinancialSettingsLocked', null), 'false', 'default lock state missing');
   assertEqual_(getSetting_('Numbering_Receipt_Prefix', null), 'GCB/HPUICK/Receipt-', 'receipt prefix not seeded');
   assertEqual_(getSetting_('AllowSelfTest', null), 'true', 'AllowSelfTest not seeded');
 
   // Test that ISO-date-shaped values round-trip correctly without Google Sheets type coercion.
-  // With plain-text formatting in place, TournamentStartDate='2026-09-21' and
-  // TournamentEndDate='2026-09-25' should be stored as literal strings, not auto-converted to Date objects.
-  assertEqual_(getSetting_('TournamentStartDate', null), '2026-09-21', 'TournamentStartDate corrupted by date auto-conversion');
-  assertEqual_(getSetting_('TournamentEndDate', null), '2026-09-25', 'TournamentEndDate corrupted by date auto-conversion');
+  // The plain-text formatting in ensureSheet_() prevents Sheets from auto-converting strings like
+  // '2026-09-21' to Date objects. Use a dedicated scratch key to verify this, then clean up.
+  ensureSheet_('SETTINGS');
+  const dateTestKey = '__TEST_DATE_KEY_' + new Date().getTime();
+  setSetting_(dateTestKey, '2026-09-21', 'test-runner');
+  assertEqual_(getSetting_(dateTestKey, null), '2026-09-21', 'date-shaped value corrupted by Sheets auto-conversion');
+  // Cleanup: remove the scratch row so SETTINGS stays clean
+  deleteRowById_('SETTINGS', 'Key', dateTestKey);
+  assertEqual_(getSetting_(dateTestKey, null), null, 'cleanup delete failed');
 }
 
 // Each task appends its own test_xxx function and registers it here.

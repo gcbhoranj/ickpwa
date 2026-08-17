@@ -98,13 +98,3 @@ function setupDriveFolders_() {
 function authorizeDriveManually() {
   return setupDriveFolders_();
 }
-
-// Helper to clear all SETTINGS data rows (for repair/reset). Deletes all rows from row 2 onward,
-// preserving only the header row. This is needed to fix corrupted values that were stored
-// before plain-text formatting was applied.
-function clearSettingsData_() {
-  const sheet = getSheet_('SETTINGS');
-  while (sheet.getLastRow() > 1) {
-    sheet.deleteRow(2); // always delete row 2, which shifts remaining rows up
-  }
-}
