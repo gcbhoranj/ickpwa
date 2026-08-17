@@ -570,5 +570,5 @@ Matches the original prompt's §106 exactly. Each phase gets its own implementat
 - Real Slides templates for receipts/relieving order will be built once the exact wording/
   layout is supplied (§59–§67 note this explicitly) — Phase 1–7 use placeholder templates
   with correct structure/fields so nothing downstream is blocked.
-- GitHub account/repo for Pages hosting will be set up when Phase 1 reaches the frontend
-  deployment step.
+- GitHub Pages: Frontend deployed to `https://github.com/gcbhoranj/ickpwa` (public repo, no
+  secrets), hosted at `https://gcbhoranj.github.io/ickpwa/`.
