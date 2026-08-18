@@ -74,7 +74,7 @@ function _buildReceiptLayout_(pres) {
   const table = slide.insertTable(4, 2, margin, y, contentWidth, tableHeight);
   table.getCell(0, 0).getText().setText('Description');
   table.getCell(0, 1).getText().setText('Amount (Rs)');
-  table.getCell(1, 0).getText().setText('Dari Charges ({{TOTAL_CONTINGENT}} x Rs {{DARI_RATE}})');
+  table.getCell(1, 0).getText().setText('Dari Charges ({{TEAM_MEMBERS}} x Rs {{DARI_RATE}})');
   table.getCell(1, 1).getText().setText('{{DARI_CHARGES}}');
   table.getCell(2, 0).getText().setText('Grand Total (charges)');
   table.getCell(2, 1).getText().setText('{{DARI_CHARGES}}');
@@ -95,6 +95,9 @@ function _buildReceiptLayout_(pres) {
     'receipt will be issued at departure.',
     0.09, 7.5, { italic: true, left: true }
   );
+  y += pageHeight * 0.04;
+  addLine('________________________', 0.03, 9, { left: true });
+  addLine('Signature, Registration Committee Convener', 0.035, 8, { left: true });
 
   return slide;
 }
