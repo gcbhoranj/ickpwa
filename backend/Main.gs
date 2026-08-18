@@ -120,6 +120,22 @@ const ACTIONS = {
   'registration.teams.detail': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return getTeamDetail_(session, payload.teamId);
+  },
+  'admin.rooms.create': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createRoom_(session, payload.roomNumber, payload.building, payload.floor, payload.capacity);
+  },
+  'rooms.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { rooms: listRooms_(session) };
+  },
+  'accommodation.listPending': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { teams: listPendingAccommodation_(session) };
+  },
+  'accommodation.allocateRoom': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return allocateRoom_(session, payload.teamId, payload.roomId, payload.personsAllocated);
   }
 };
 

@@ -524,6 +524,105 @@ function test_registration_registerTeam_needsAccommodationFlag() {
   }
 }
 
+function test_rooms_createAndList() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const marker = 'TEST-ROOM-' + new Date().getTime();
+  let createdRoomId = null;
+  try {
+    const room = createRoom_(adminSession, marker, 'Hostel A', '2', 3);
+    createdRoomId = room.roomId;
+    assertEqual_(room.status, 'AVAILABLE', 'new room should start AVAILABLE');
+
+    let threwForbidden = false;
+    try {
+      createRoom_(regSession, marker + '-2', 'Hostel A', '2', 2);
+    } catch (err) {
+      threwForbidden = true;
+      assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin room creation');
+    }
+    assertTrue_(threwForbidden, 'createRoom_ did not reject a non-admin caller');
+
+    let threwDuplicate = false;
+    try {
+      createRoom_(adminSession, marker, 'Hostel B', '1', 2);
+    } catch (err) {
+      threwDuplicate = true;
+      assertEqual_(err.code, 'DUPLICATE', 'wrong error code for duplicate room number');
+    }
+    assertTrue_(threwDuplicate, 'createRoom_ did not reject a duplicate room number');
+
+    const rooms = listRooms_(regSession);
+    const listed = rooms.filter(function (r) { return r.roomId === createdRoomId; })[0];
+    assertTrue_(!!listed, 'listRooms_ did not include the newly created room');
+    assertEqual_(listed.capacity, 3, 'listed room capacity mismatch');
+    assertEqual_(listed.remaining, 3, 'a fresh room with no allocations should show full remaining capacity');
+  } finally {
+    if (createdRoomId) deleteRowById_('ROOMS', 'RoomId', createdRoomId);
+  }
+}
+
+function test_accommodation_listPendingAndAllocateRoom() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  const marker = 'TEST-ALLOC-' + new Date().getTime();
+  let createdTeamId = null;
+  let createdRoomId = null;
+  let createdAllocationId = null;
+  try {
+    const team = registerTeam_(regSession, 'Allocation Test College', 'District', 5, [
+      { name: 'Coach One', isPrimary: true, needsAccommodation: true },
+      { name: 'Coach Two', isPrimary: false, needsAccommodation: true }
+    ]);
+    createdTeamId = team.teamId;
+
+    const room = createRoom_(adminSession, marker, 'Hostel A', '1', 1);
+    createdRoomId = room.roomId;
+
+    const pendingBefore = listPendingAccommodation_(accSession).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!pendingBefore, 'newly registered team with flagged incharges should appear in the pending list');
+    assertEqual_(pendingBefore.neededCount, 2, 'expected 2 incharges needing accommodation');
+    assertEqual_(pendingBefore.remainingCount, 2, 'nothing allocated yet, remaining should equal needed');
+
+    let threwForbidden = false;
+    try {
+      allocateRoom_(regSession, createdTeamId, createdRoomId, 1);
+    } catch (err) {
+      threwForbidden = true;
+      assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-Accommodation caller');
+    }
+    assertTrue_(threwForbidden, 'allocateRoom_ did not reject a non-Accommodation caller');
+
+    const allocation = allocateRoom_(accSession, createdTeamId, createdRoomId, 1);
+    createdAllocationId = allocation.allocationId;
+
+    const roomsAfter = listRooms_(accSession).filter(function (r) { return r.roomId === createdRoomId; })[0];
+    assertEqual_(roomsAfter.remaining, 0, 'room capacity 1 should be fully consumed by 1 allocated person');
+    assertEqual_(roomsAfter.status, 'FULL', 'room should flip to FULL once capacity is reached');
+
+    let threwFull = false;
+    try {
+      allocateRoom_(accSession, createdTeamId, createdRoomId, 1);
+    } catch (err) {
+      threwFull = true;
+      assertEqual_(err.code, 'ROOM_FULL', 'wrong error code for an over-capacity allocation');
+    }
+    assertTrue_(threwFull, 'allocateRoom_ did not reject an allocation exceeding remaining room capacity');
+
+    const pendingAfter = listPendingAccommodation_(accSession).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!pendingAfter, 'team should still be pending — 1 of 2 incharges allocated');
+    assertEqual_(pendingAfter.remainingCount, 1, 'expected exactly 1 remaining incharge needing a room');
+  } finally {
+    if (createdAllocationId) deleteRowById_('ACCOMMODATION', 'AllocationId', createdAllocationId);
+    if (createdRoomId) deleteRowById_('ROOMS', 'RoomId', createdRoomId);
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -545,7 +644,9 @@ const TEST_CASES = [
   { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards },
   { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData },
   { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },
-  { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag }
+  { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag },
+  { name: 'rooms_createAndList', fn: test_rooms_createAndList },
+  { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom }
 ];
 
 function runAllTests_() {
