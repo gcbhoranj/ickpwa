@@ -22,7 +22,7 @@ function renderRegistrationDashboard(root, user) {
 }
 
 function renderRegisterWizard(root, user) {
-  const state = { teamId: null, registrationNumber: null, incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true }] };
+  const state = { teamId: null, registrationNumber: null, incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }] };
 
   function renderTeamDetailsStep() {
     root.innerHTML =
@@ -50,6 +50,7 @@ function renderRegisterWizard(root, user) {
           '<label>WhatsApp<input type="text" data-field="whatsapp" data-idx="' + i + '" value="' + inc.whatsapp + '"></label>' +
           '<label>Email<input type="email" data-field="email" data-idx="' + i + '" value="' + inc.email + '"></label>' +
           '<label><input type="radio" name="primary-incharge" data-idx="' + i + '" ' + (inc.isPrimary ? 'checked' : '') + ' style="width:auto;display:inline"> Primary contact</label>' +
+          '<label><input type="checkbox" data-accom-idx="' + i + '" ' + (inc.needsAccommodation ? 'checked' : '') + ' style="width:auto;display:inline"> Needs accommodation (room)</label>' +
         '</fieldset>';
       }).join('');
       Array.prototype.forEach.call(container.querySelectorAll('input[data-field]'), function (el) {
@@ -62,11 +63,16 @@ function renderRegisterWizard(root, user) {
           state.incharges.forEach(function (inc, i) { inc.isPrimary = i === Number(el.getAttribute('data-idx')); });
         });
       });
+      Array.prototype.forEach.call(container.querySelectorAll('input[data-accom-idx]'), function (el) {
+        el.addEventListener('change', function () {
+          state.incharges[Number(el.getAttribute('data-accom-idx'))].needsAccommodation = el.checked;
+        });
+      });
     }
     renderInchargeRows();
 
     document.getElementById('add-incharge-btn').addEventListener('click', function () {
-      state.incharges.push({ name: '', designation: '', whatsapp: '', email: '', isPrimary: false });
+      state.incharges.push({ name: '', designation: '', whatsapp: '', email: '', isPrimary: false, needsAccommodation: false });
       renderInchargeRows();
     });
 
