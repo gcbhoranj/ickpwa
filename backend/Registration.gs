@@ -29,6 +29,7 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
       InchargeId: nextId_('INC', 4), TeamId: teamId, Name: inc.name, Designation: inc.designation || '',
       WhatsAppNumber: inc.whatsapp || '', EmailAddress: inc.email || '',
       IsPrimary: (hasPrimary ? !!inc.isPrimary : i === 0) ? 'true' : 'false', Active: 'true',
+      NeedsAccommodation: inc.needsAccommodation ? 'true' : 'false',
       CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
     });
   });

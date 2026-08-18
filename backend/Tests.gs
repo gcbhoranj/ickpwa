@@ -500,6 +500,30 @@ function test_registration_listAndDetailTeams() {
   }
 }
 
+function test_registration_registerTeam_needsAccommodationFlag() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Accommodation Flag College', 'District', 6, [
+      { name: 'Needs Room', isPrimary: true, needsAccommodation: true },
+      { name: 'No Room Needed', isPrimary: false, needsAccommodation: false },
+      { name: 'Unspecified', isPrimary: false }
+    ]);
+    createdTeamId = team.teamId;
+    const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId);
+    const byName = {};
+    incharges.forEach(function (i) { byName[i.Name] = i; });
+    assertEqual_(byName['Needs Room'].NeedsAccommodation, 'true', 'flagged incharge should be marked NeedsAccommodation=true');
+    assertEqual_(byName['No Room Needed'].NeedsAccommodation, 'false', 'unflagged incharge should be marked NeedsAccommodation=false');
+    assertEqual_(byName['Unspecified'].NeedsAccommodation, 'false', 'omitted needsAccommodation should default to false, not blank/undefined');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -520,7 +544,8 @@ const TEST_CASES = [
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
   { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards },
   { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData },
-  { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams }
+  { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },
+  { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag }
 ];
 
 function runAllTests_() {
