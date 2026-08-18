@@ -165,7 +165,7 @@ being processed.
 
 ### CONTINGENT_INCHARGES
 `InchargeId, TeamId, Name, Designation, WhatsAppNumber, EmailAddress, IsPrimary(bool),
-Active(bool)`
+Active(bool), NeedsAccommodation(bool — added §19)`
 
 ### PAYMENTS  (append-only ledger)
 `PaymentId, TeamId, Amount, Mode, ReceivedAt, Purpose(REGISTRATION_CHARGES/SECURITY/
@@ -572,3 +572,42 @@ Matches the original prompt's §106 exactly. Each phase gets its own implementat
   with correct structure/fields so nothing downstream is blocked.
 - GitHub Pages: Frontend deployed to `https://github.com/gcbhoranj/ickpwa` (public repo, no
   secrets), hosted at `https://gcbhoranj.github.io/ickpwa/`.
+
+## 19. Phase 3.5 amendment — Admin Settings, Dari formula correction, Room Master, Incharge
+   Accommodation (decided 2026-08-18)
+
+After Phase 3 shipped, real-world use surfaced one correction and one re-prioritization,
+decided with the human partner before writing this phase's plan:
+
+- **Dari charge formula correction.** Phase 3 calculated `Dari Charges = RateDari ×
+  TotalContingentPersons` (team members + incharges). This is now corrected to `RateDari ×
+  NumberOfTeamMembers` (students only) — incharges (staff) get real room accommodation, not
+  a dari/mat, so no dari charge applies to them. This supersedes the Phase 3 plan's stated
+  formula; `CHARGES.DariCharges` and the temporary receipt's Dari line both follow the new
+  formula.
+- **Room master + incharge accommodation pulled forward from Phase 6.** The original phase
+  order (§17) put all of `ROOMS`/`ACCOMMODATION` in Phase 6, after food packages (4) and mess
+  (5). Real-world need moved the room master and incharge-specific accommodation into this
+  phase instead, using the `ROOMS` and `ACCOMMODATION` schemas already defined in §5
+  unchanged. Scope drawn narrowly for now:
+  - Admin creates/lists rooms (room master) — `ROOMS` is otherwise-unclaimed master data in
+    the original role matrix (§12 lists rooms only under "allocate/reallocate/vacate", which
+    stays Accommodation's job); creating the room pool itself is treated as Admin's
+    responsibility, alongside rates/settings.
+  - `CONTINGENT_INCHARGES` gains `NeedsAccommodation` (bool) — set by Registration per
+    incharge, at registration time, alongside the existing incharge fields.
+  - Accommodation gets its first real screen: a pending list (per team, incharges flagged vs.
+    already allocated) and a single `allocateRoom` action (team's flagged incharges → a
+    room, validated against remaining room capacity). Reallocation, vacating, and NOC issuance
+    remain out of scope here — they depend on the departure workflow (§14's departure/refund
+    flow), which doesn't exist yet, and stay in the real future Phase 6 alongside whatever
+    team-member-level accommodation need (if any) turns out to exist once that phase is
+    planned.
+- **Admin Settings screen.** Phase 3's `admin.settings.updateRates`/`setFinancialLock`
+  actions were built and tested but never got a frontend screen (Phase 3 plan's explicit
+  scope note) — Admin has been setting real rates via curl. This phase adds the screen; no
+  backend change needed.
+- **Temporary receipt gains a signature line.** The generated Slides template (built in
+  Phase 3) has no signature line at all — not a wording change, a new line: "Signature,
+  Registration Committee Convener" at the bottom, matching the physical reference format
+  supplied for the receipt layout.
