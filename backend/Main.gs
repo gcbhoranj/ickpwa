@@ -104,6 +104,14 @@ const ACTIONS = {
   'registration.payment.record': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return recordPayment_(session, payload.teamId, payload.mode);
+  },
+  'admin.bootstrap.createReceiptTemplate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createTemporaryReceiptTemplate_(session, !!(payload && payload.force));
+  },
+  'registration.receipt.generateTemporary': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return generateTemporaryReceipt_(session, payload.teamId);
   }
 };
 

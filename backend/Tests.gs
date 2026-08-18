@@ -441,6 +441,40 @@ function test_registration_recordPayment_createsTwoRowsAndGuards() {
   }
 }
 
+function test_receipts_generateTemporaryReceipt_guardsMissingData() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Receipt Guard Test', 'District', 5, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    let threwNoCharges = false;
+    try {
+      generateTemporaryReceipt_(regSession, createdTeamId);
+    } catch (err) {
+      threwNoCharges = true;
+      assertEqual_(err.code, 'NOT_FOUND', 'wrong error code when charges not yet calculated');
+    }
+    assertTrue_(threwNoCharges, 'generateTemporaryReceipt_ did not guard against missing charges');
+
+    calculateCharges_(regSession, createdTeamId);
+    let threwNoPayment = false;
+    try {
+      generateTemporaryReceipt_(regSession, createdTeamId);
+    } catch (err) {
+      threwNoPayment = true;
+      assertEqual_(err.code, 'NOT_FOUND', 'wrong error code when payment not yet recorded');
+    }
+    assertTrue_(threwNoPayment, 'generateTemporaryReceipt_ did not guard against missing payment');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -459,7 +493,8 @@ const TEST_CASES = [
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
-  { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards }
+  { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards },
+  { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData }
 ];
 
 function runAllTests_() {
