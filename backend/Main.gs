@@ -112,6 +112,14 @@ const ACTIONS = {
   'registration.receipt.generateTemporary': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return generateTemporaryReceipt_(session, payload.teamId);
+  },
+  'registration.teams.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { teams: listTeams_(session) };
+  },
+  'registration.teams.detail': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getTeamDetail_(session, payload.teamId);
   }
 };
 

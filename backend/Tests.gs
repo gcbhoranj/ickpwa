@@ -475,6 +475,31 @@ function test_receipts_generateTemporaryReceipt_guardsMissingData() {
   }
 }
 
+function test_registration_listAndDetailTeams() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'List Detail Test College', 'District', 6, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const list = listTeams_(regSession);
+    const found = list.filter(function (t) { return t.teamId === createdTeamId; })[0];
+    assertTrue_(!!found, 'listTeams_ did not include the newly registered team');
+    assertEqual_(found.status, 'REGISTERED', 'listed team status mismatch');
+
+    const detail = getTeamDetail_(regSession, createdTeamId);
+    assertEqual_(detail.team.TeamId, createdTeamId, 'getTeamDetail_ returned wrong team');
+    assertEqual_(detail.incharges.length, 1, 'getTeamDetail_ incharges count mismatch');
+    assertEqual_(detail.charges, null, 'charges should be null before calculateCharges_ is called');
+    assertEqual_(detail.payments.length, 0, 'payments should be empty before recordPayment_ is called');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -494,7 +519,8 @@ const TEST_CASES = [
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
   { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards },
-  { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData }
+  { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData },
+  { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams }
 ];
 
 function runAllTests_() {

@@ -107,3 +107,28 @@ function recordPayment_(actorSession, teamId, mode) {
     totalReceived: Number(charge.DariCharges) + Number(charge.SecurityCharges)
   };
 }
+
+function listTeams_(actorSession) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  return rowsToObjects_('TEAMS').map(function (t) {
+    return {
+      teamId: t.TeamId, registrationNumber: t.RegistrationNumber, collegeName: t.CollegeName,
+      districtName: t.DistrictName, totalContingentPersons: t.TotalContingentPersons, status: t.Status,
+      registrationDateTime: t.RegistrationDateTime
+    };
+  });
+}
+
+function getTeamDetail_(actorSession, teamId) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
+  const charges = findRowsByField_('CHARGES', 'TeamId', teamId);
+  return {
+    team: team.values,
+    incharges: findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId),
+    charges: charges.length > 0 ? charges[0] : null,
+    payments: findRowsByField_('PAYMENTS', 'TeamId', teamId),
+    receipts: findRowsByField_('RECEIPTS', 'TeamId', teamId)
+  };
+}
