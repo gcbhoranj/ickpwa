@@ -35,3 +35,7 @@ table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85r
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
 .users-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 600px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 .toggle-btn { width: auto; margin: 0; padding: 4px 10px; font-size: 0.8rem; }
+
+.wizard-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+fieldset { border-radius: 8px; }
+legend { font-weight: 600; color: var(--brand); padding: 0 6px; }
