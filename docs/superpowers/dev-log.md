@@ -72,3 +72,57 @@ the real live URL after a reload. **Lesson reinforced, now written twice:** bump
 `CACHE_NAME` needs to become a standard step of every frontend deploy, not just a documented
 warning — worth adding a pre-deploy checklist item or an automated version stamp in a later
 phase so this can't be forgotten a third time.
+
+## 2026-08-18 — Phase 3 (Registration) complete
+
+- Backend: `findRowsByField_` (one-to-many sheet lookups) and `nextDocumentNumber_` (the
+  second, human-facing ID family — Admin-configurable prefix/next/padding, distinct from
+  internal record IDs) laid the foundation. `admin.settings.updateRates` /
+  `setFinancialLock` / public `registration.getInfo` manage the rate card and its lock.
+  `registration.registerTeam` creates a team plus its contingent incharges (primary
+  auto-assigned when none is specified). `registration.calculateCharges` computes Dari
+  Charges (rate × total contingent headcount, members + incharges) and Security (a flat
+  `SETTINGS.SecurityAmount`, not per-person) and guards against recalculation for the same
+  team. `registration.recordPayment` writes exactly two PAYMENTS rows in one action
+  (`REGISTRATION_CHARGES` + `SECURITY`) for the calculated total, no operator-supplied
+  amount, and guards against double recording. `registration.listTeams` /
+  `registration.getTeamDetail` round out the read side. All ten new actions gated to
+  `[ADMIN, REGISTRATION]`.
+- Document generation: `receipts.generateTemporaryReceipt` — the project's first real
+  document pipeline, using `SlidesApp` as a template engine (`replaceAllText` +
+  `getAs('application/pdf')`), no Advanced Service manifest entry needed. A live spike
+  during planning found neither `SlidesApp` nor the raw Advanced Slides API can set a
+  custom page size (both produced the default 720×405pt page regardless of requested
+  size) — a genuine platform limitation. Decision: ship the receipt at the default page
+  size now: the spec explicitly defers exact physical dimensions ("format will be
+  supplied later"), so document *accuracy* is this phase's job and physical *sizing* is a
+  one-time manual resize in the Slides UI whenever a real format arrives, not code this
+  phase needs to handle. `RECEIPTS.GrandTotal` holds charges only (Dari, later meal),
+  never Security, matching how the Phase 8 Final Receipt must present them; the temp
+  receipt template shows Security as a separate non-charge line plus a computed
+  "Total Amount Received." `AmountInWords` stays blank for temporary receipts —
+  number-to-words is Phase 8's job.
+- Scope decision (made explicit before writing the plan): this phase is **food-free**.
+  Meal charges/food packages, described in the original prompt as bundled into
+  registration, were moved entirely to Phase 4 per the approved design spec — `CHARGES.
+  MealCharges` stays 0 and unused until then, not removed from the schema.
+  `FinancialSettingsLocked` blocks rate *updates* while locked but is not a gate on charge
+  *calculation* — matches the spec's description of locking as an operational safety
+  practice, not a technical precondition.
+- Frontend: Registration Dashboard (nav for the REGISTRATION role, replacing the Phase 1
+  placeholder), the registration wizard (team + incharges → charges → payment →
+  receipt), and Teams list/detail. `CACHE_NAME` bumped to `v3`/`v4`/`v5` across the three
+  frontend tasks, each with its new file added to `SHELL_FILES` — no repeat of the Phase 2
+  stale-cache incident.
+- **No Admin Settings frontend screen yet** — Task 2's rate/lock actions are real and
+  tested, but Admin still sets real rates via curl for now (Phase 1's placeholder rates,
+  e.g. `SecurityAmount: '0'`, need to be set to real values before real registrations
+  begin). A Settings screen is a reasonable candidate for a later phase, not built here.
+- Verified live end-to-end on `https://gcbhoranj.github.io/ickpwa/` (not just localhost):
+  a real team was registered with a contingent incharge, charges calculated correctly,
+  payment recorded, and the generated temporary receipt PDF opened with correct data and
+  no unreplaced `{{...}}` tokens — confirmed directly by the human. `system.selfTest`
+  reports 19/19 passing against the live backend, including all Phase 3 cases.
+- Explicitly NOT built yet (later phases): food packages/meal charges/coupons (Phase 4),
+  mess scanning, accommodation, refunds, the Final Receipt and its amount-in-words
+  conversion, reports, and the Admin Settings frontend screen noted above.
