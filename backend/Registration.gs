@@ -56,7 +56,7 @@ function calculateCharges_(actorSession, teamId) {
   const rateDinner = Number(getSetting_('RateDinner', '0'));
   const securityAmount = Number(getSetting_('SecurityAmount', '0'));
 
-  const dariCharges = rateDari * Number(team.values.TotalContingentPersons);
+  const dariCharges = rateDari * Number(team.values.NumberOfTeamMembers);
   const totalPayable = dariCharges + securityAmount;
   const chargeId = nextId_('CHG', 4);
   const now = new Date().toISOString();
