@@ -1,4 +1,4 @@
-// app.js — page bootstrap: show login, or route to a role-labeled landing placeholder.
+// app.js — page bootstrap: show login, or route to a role-labeled landing/dashboard.
 
 const ROLE_LABELS = {
   ADMIN: 'Admin', REGISTRATION: 'Registration Committee',
@@ -33,8 +33,13 @@ function renderLogin(root, errorMessage) {
 function renderLanding(root, user) {
   const isAdmin = user.role === 'ADMIN';
   const isRegistration = user.role === 'REGISTRATION';
+  const isAccommodation = user.role === 'ACCOMMODATION';
   if (isRegistration) {
     renderRegistrationDashboard(root, user);
+    return;
+  }
+  if (isAccommodation) {
+    renderAccommodationDashboard(root, user);
     return;
   }
   root.innerHTML =
@@ -42,15 +47,23 @@ function renderLanding(root, user) {
       '<h1>Welcome, ' + user.name + '</h1>' +
       '<p class="subtitle">' + (ROLE_LABELS[user.role] || user.role) + '</p>' +
       (isAdmin
-        ? '<p>Manage committee accounts below. Other screens are built in a later phase.</p>'
+        ? '<p>Manage committee accounts and tournament settings below. Other screens are built in a later phase.</p>'
         : '<p>This role\'s screens are built in a later phase. Foundation phase confirms your ' +
           'login and session work end-to-end.</p>') +
       (isAdmin ? '<button id="manage-users-btn">Manage Users</button>' : '') +
+      (isAdmin ? '<button id="settings-btn">Settings</button>' : '') +
+      (isAdmin ? '<button id="rooms-btn">Rooms</button>' : '') +
       '<button id="logout-btn">Log Out</button>' +
     '</div>';
   if (isAdmin) {
     document.getElementById('manage-users-btn').addEventListener('click', function () {
       renderUsersScreen(root, user);
+    });
+    document.getElementById('settings-btn').addEventListener('click', function () {
+      renderSettingsScreen(root, user);
+    });
+    document.getElementById('rooms-btn').addEventListener('click', function () {
+      renderRoomsScreen(root, user);
     });
   }
   document.getElementById('logout-btn').addEventListener('click', async function () {
