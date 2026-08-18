@@ -32,6 +32,11 @@ function renderLogin(root, errorMessage) {
 
 function renderLanding(root, user) {
   const isAdmin = user.role === 'ADMIN';
+  const isRegistration = user.role === 'REGISTRATION';
+  if (isRegistration) {
+    renderRegistrationDashboard(root, user);
+    return;
+  }
   root.innerHTML =
     '<div class="landing-card">' +
       '<h1>Welcome, ' + user.name + '</h1>' +
