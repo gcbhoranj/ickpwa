@@ -386,7 +386,7 @@ function test_registration_calculateCharges_correctAndIdempotentGuard() {
     assertEqual_(charges.totalContingentPersons, 11, 'expected 10 members + 1 incharge = 11');
     assertEqual_(charges.dariCharges, rateDari * 10, 'dari charges should be rate × team members only (10), not × total contingent (11)');
     assertEqual_(charges.securityCharges, security, 'security should be flat, not multiplied by headcount');
-    assertEqual_(charges.totalPayable, (rateDari * 11) + security, 'total payable miscalculated');
+    assertEqual_(charges.totalPayable, (rateDari * 10) + security, 'total payable miscalculated');
 
     let threwDuplicate = false;
     try {
