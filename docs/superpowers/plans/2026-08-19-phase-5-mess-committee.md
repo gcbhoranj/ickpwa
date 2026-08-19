@@ -228,12 +228,16 @@ function test_registration_getTeamDetail_redactsFinancialsForMess() {
 }
 
 function test_foodPackages_messRoleParity() {
+  // Registration still owns team creation (requireRole_ correctly excludes MESS there) — this
+  // test proves MESS parity on the PACKAGE actions for a team that already exists, matching
+  // the real counter-sale scenario (a team walks up already registered by Registration).
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
   let createdTeamId = null;
   const createdPackageIds = [];
   const trashFileIds = [];
   try {
-    const team = registerTeam_(messSession, 'Mess Sale Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
+    const team = registerTeam_(regSession, 'Mess Sale Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
 
     const pkg = purchasePackage_(messSession, createdTeamId, false, null, 'Cash', null);

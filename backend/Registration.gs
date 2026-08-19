@@ -116,7 +116,7 @@ function recordPayment_(actorSession, teamId, mode) {
 }
 
 function listTeams_(actorSession) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   return rowsToObjects_('TEAMS').map(function (t) {
     return {
       teamId: t.TeamId, registrationNumber: t.RegistrationNumber, collegeName: t.CollegeName,
@@ -127,9 +127,19 @@ function listTeams_(actorSession) {
 }
 
 function getTeamDetail_(actorSession, teamId) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
+  // Mess sells packages and needs team identity/incharges, but never Dari/security/
+  // total-payable figures or the temporary receipt (spec §20, narrowing the shared
+  // read endpoint's field visibility rather than duplicating the handler).
+  if (actorSession.role === ROLES.MESS) {
+    return {
+      team: team.values,
+      incharges: findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId),
+      charges: null, payments: [], receipts: []
+    };
+  }
   const charges = findRowsByField_('CHARGES', 'TeamId', teamId);
   return {
     team: team.values,

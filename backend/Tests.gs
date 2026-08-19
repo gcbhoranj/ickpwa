@@ -596,6 +596,83 @@ function test_registration_registerTeam_needsAccommodationFlag() {
   }
 }
 
+function test_registration_getTeamDetail_redactsFinancialsForMess() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Mess Redaction Test College', 'District', 6, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    calculateCharges_(regSession, createdTeamId, true, true);
+    recordPayment_(regSession, createdTeamId, 'Cash');
+
+    const asMess = getTeamDetail_(messSession, createdTeamId);
+    assertEqual_(asMess.team.TeamId, createdTeamId, 'MESS caller should still see team identity');
+    assertEqual_(asMess.incharges.length, 1, 'MESS caller should still see incharges');
+    assertEqual_(asMess.charges, null, 'MESS caller must not see charges');
+    assertEqual_(asMess.payments.length, 0, 'MESS caller must not see payments');
+    assertEqual_(asMess.receipts.length, 0, 'MESS caller must not see receipts');
+
+    const asRegistration = getTeamDetail_(regSession, createdTeamId);
+    assertTrue_(!!asRegistration.charges, 'REGISTRATION caller should still see charges');
+    assertEqual_(asRegistration.payments.length, 2, 'REGISTRATION caller should still see both payment rows');
+
+    const list = listTeams_(messSession);
+    assertTrue_(list.some(function (t) { return t.teamId === createdTeamId; }), 'MESS caller should be able to list teams');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+function test_foodPackages_messRoleParity() {
+  // Registration still owns team creation (requireRole_ correctly excludes MESS there) — this
+  // test proves MESS parity on the PACKAGE actions for a team that already exists, matching
+  // the real counter-sale scenario (a team walks up already registered by Registration).
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let createdTeamId = null;
+  const createdPackageIds = [];
+  const trashFileIds = [];
+  try {
+    const team = registerTeam_(regSession, 'Mess Sale Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const pkg = purchasePackage_(messSession, createdTeamId, false, null, 'Cash', null);
+    createdPackageIds.push(pkg.packageId);
+    trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
+    assertTrue_(pkg.amount > 0, 'MESS-purchased package should report a real amount, not hidden/zeroed');
+
+    const listed = listPackages_(messSession, createdTeamId);
+    assertEqual_(listed.length, 1, 'MESS caller should see the package it just sold');
+    assertEqual_(listed[0].amount, pkg.amount, 'MESS caller should see the real package amount to collect correct cash');
+
+    const resend = resendCoupon_(messSession, pkg.packageId, ['not-a-real-inbox@example.invalid']);
+    assertTrue_(resend.status === 'SENT' || resend.status === 'FAILED', 'MESS caller should be able to resend');
+
+    const reprint = reprintCoupon_(messSession, pkg.packageId);
+    trashFileIds.push(reprint.printedCouponFileId);
+    assertEqual_(reprint.printBatchId, 2, 'MESS caller should be able to reprint');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    createdPackageIds.forEach(function (packageId) {
+      findRowsByField_('PRINTED_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
+      deleteRowById_('FOOD_PACKAGES', 'PackageId', packageId);
+    });
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 function test_rooms_createAndList() {
   const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'y' };
@@ -954,7 +1031,9 @@ const TEST_CASES = [
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
   { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
   { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, slow: true },
-  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, slow: true }
+  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, slow: true },
+  { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
+  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, slow: true }
 ];
 
 function runAllTests_() {

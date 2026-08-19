@@ -53,7 +53,7 @@ function _addDays_(dateStr, days) {
 }
 
 function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, dinnerDate, mode, recipientEmails) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
   if (!mode) throw apiError_('VALIDATION_ERROR', 'Payment mode is required.');
@@ -154,7 +154,7 @@ function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, d
 }
 
 function listPackages_(actorSession, teamId) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   return findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId).map(function (p) {
     return {
       packageId: p.PackageId, packageNumber: Number(p.PackageNumber), eligiblePersons: Number(p.EligiblePersons),
@@ -168,7 +168,7 @@ function listPackages_(actorSession, teamId) {
 
 // Re-sends the EXISTING digital coupon PDF — no new package, coupon, QR, or PDF (spec §14).
 function resendCoupon_(actorSession, packageId, recipientEmails) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const pkg = findRowById_('FOOD_PACKAGES', 'PackageId', packageId);
   if (!pkg) throw apiError_('NOT_FOUND', 'No such package: ' + packageId);
   if (!pkg.values.DigitalCouponPdfFileId) throw apiError_('NOT_FOUND', 'No digital coupon PDF has been generated for this package.');
@@ -184,7 +184,7 @@ function resendCoupon_(actorSession, packageId, recipientEmails) {
 // PRINTED_COUPONS batch (new PrintBatchId), never a new package/coupon/QR (spec §14,
 // recommendation §11). For a physical reprint, not emailed.
 function reprintCoupon_(actorSession, packageId) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const pkg = findRowById_('FOOD_PACKAGES', 'PackageId', packageId);
   if (!pkg) throw apiError_('NOT_FOUND', 'No such package: ' + packageId);
 
