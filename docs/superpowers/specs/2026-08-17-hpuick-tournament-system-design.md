@@ -611,3 +611,97 @@ decided with the human partner before writing this phase's plan:
   Phase 3) has no signature line at all — not a wording change, a new line: "Signature,
   Registration Committee Convener" at the bottom, matching the physical reference format
   supplied for the receipt layout.
+
+## 20. Phase 5 amendment — Mess Committee panel: scanning + package sales (decided 2026-08-19)
+
+Fills in the two things §14/§15's "Mess scan (group entry)" flow and screen map left as
+section-number references to the original prompt, plus one scope addition decided with the
+human partner before writing this phase's plan: **the Mess Committee panel also sells food
+packages at the counter**, not just Registration.
+
+**The 10-point scan validity check** (server-side, `mess.recordUsage`, re-run on every scan —
+resolving the QR only tells you which coupon; this decides whether the claim is honored):
+1. Session valid, caller role = MESS (or ADMIN).
+2. QR token resolves to an existing `FOOD_COUPONS` row.
+3. Coupon `Status` = ACTIVE.
+4. Package `Status` = ACTIVE (not CANCELLED).
+5. Team `Status` is not LOST/RELIEVED.
+6. Today's date matches the target `MEAL_ENTITLEMENTS` row's date (a coupon's three meals are
+   each pinned to one specific date, not a range).
+7. Server clock is inside that meal's configured start/end window ± grace minutes (§ Phase 4
+   `MealTiming*` settings).
+8. The meal implied by the current time (Breakfast/Lunch/Dinner) is the one being claimed —
+   a coupon can't be claimed against the wrong meal even if some entitlement row exists.
+9. Requested count ≤ `RemainingPersons` (`EligiblePersons − ServedPersons`) — the core
+   anti-fraud check driving the group-entry scenario the human described: mess scans, sees
+   Remaining, asks the team how many are eating *right now*, and denies entry outright if the
+   claimed count exceeds Remaining.
+10. Request is not a duplicate of an already-processed `requestId` (idempotent retry safety,
+    §47/§48).
+
+Any failure returns a clear rejection reason plus the eligible/served/remaining/requested
+numbers (§43 of the original prompt) and writes nothing — no `MEAL_USAGE` row, no separate
+"denied attempt" record either (decided with the human: keep the ledger a clean record of
+actual consumption only; the on-screen rejection is the mess operator's cue to deny entry).
+A successful claim appends one `MEAL_USAGE` row and updates `ServedPersons`/`RemainingPersons`
+on the entitlement, inside the same script-lock class as other counter-touching operations
+(recommendation §4/§21) so two mess counters scanning the same coupon at once can't both
+commit past Remaining.
+
+**`MealOrderStatus` is informational, not a scan gate** (decided with the human): Mess sets a
+date+meal to ORDERED/CLOSED via `mess.setMealOrderStatus`, shown on the Current Meal screen,
+but `mess.recordUsage` never consults it — scanning is gated purely by the 10 points above.
+`MealOrderStatus` exists for the later dinner-ordered-vs-not refund rule (§50–§52, Departure
+phase), not built here.
+
+**QR input: camera scan with a manual-entry fallback**, both always available on the Scan
+screen. Camera decode uses the browser's native `BarcodeDetector` Shape Detection API
+(Chrome/Edge; no vendored library, no network call — the same self-contained principle as
+`QrEncoder.gs`'s encoder) when the browser supports it; the manual token field covers
+unsupported browsers and a damaged/unscannable QR either way.
+
+**Package sales — Mess gets purchase/resend/reprint parity with Registration.** Decided with
+the human mid-phase: the Mess Committee panel is also where meal packages get sold at the
+counter, not exclusively Registration. This is a role-permission widening, not new backend
+logic:
+- §12's role matrix row "Purchase food package, generate/email/share/resend coupons" changes
+  from MESS ❌ to **MESS ✅** (Registration keeps ✅ — both roles can do this, not exclusive).
+- `FoodPackages.gs`'s `purchasePackage_`/`listPackages_`/`resendCoupon_`/`reprintCoupon_`
+  (Main.gs actions `registration.package.*`) add `ROLES.MESS` to their existing
+  `requireRole_([ROLES.ADMIN, ROLES.REGISTRATION])` checks — same handlers, same screen
+  (`packages.js`), reused unchanged for both roles.
+- **Team lookup added to Mess's nav**: `listTeams_`/`getTeamDetail_` (`registration.teams.*`)
+  also add `ROLES.MESS`, so Mess gets a Teams search screen leading into a team's Food
+  Packages screen — needed because a team buying Package 2+ at the mess counter usually isn't
+  presenting an already-scanned coupon.
+- **Field visibility on the shared team-detail endpoint** (§6 point 7's existing rule, applied
+  here rather than duplicating the handler): when the caller role is MESS, `getTeamDetail_`
+  omits `charges`, `payments`, and `receipts` from its response — Mess sees team identity and
+  incharges (needed to sell a package) but never Dari/security/total-payable figures or the
+  temporary receipt. The frontend's Team Detail rendering skips those sections when absent.
+- **Package amount stays visible to Mess on the Packages screen itself** (decided with the
+  human): `packages.js`'s purchase form and package list already show only the food-package
+  amount (rate × eligible persons), never Dari/security/total — narrowing §6's "Mess never
+  receives payment amounts" rule to exclude this one screen, where Mess needs the figure to
+  collect the right cash at the counter. Every other read endpoint keeps the existing rule
+  unchanged.
+
+**Screen map update (§13):** MESS becomes **Current Meal · Scan · Today's Summary · Teams**
+(Teams → Team Detail → Food Packages, reusing Registration's existing screen).
+
+**Today's Summary** (§15, recommendation §27): `mess.todaysSummary` aggregates
+`MEAL_ENTITLEMENTS` for the current server date+meal, grouped by team — College | Eligible |
+Served | Remaining, read-only, unchanged from the original spec description.
+
+**New backend module `Mess.gs`**, actions registered in `Main.gs` under `mess.*`:
+`mess.currentMeal` (today's date, current meal + window status, that meal's order status),
+`mess.setMealOrderStatus`, `mess.resolveToken`, `mess.recordUsage`, `mess.todaysSummary`,
+`mess.searchByCouponId` (lost/damaged coupon lookup, §15). All follow the standard handler
+shape (§6): session/role check, lock where the action touches `ServedPersons`/
+`RemainingPersons`/`MEAL_USAGE`/`MEAL_ORDER_STATUS`, validate, write, audit-log.
+
+**New frontend `mess.js`** plus a `renderMessDashboard` landing screen (same pattern as
+`renderRegistrationDashboard`/`renderAccommodationDashboard` in `app.js`): Current Meal, Scan,
+Today's Summary, Teams. The Teams/Team-Detail/Packages path reuses `registration.js`'s
+`renderTeamsList`/`renderTeamDetail` and `packages.js`'s `renderPackagesScreen` unchanged,
+called from the Mess dashboard instead of the Registration one.
