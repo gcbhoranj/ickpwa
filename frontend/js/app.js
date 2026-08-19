@@ -89,12 +89,17 @@ function renderLanding(root, user) {
   const isAdmin = user.role === 'ADMIN';
   const isRegistration = user.role === 'REGISTRATION';
   const isAccommodation = user.role === 'ACCOMMODATION';
+  const isMess = user.role === 'MESS';
   if (isRegistration) {
     renderRegistrationDashboard(root, user);
     return;
   }
   if (isAccommodation) {
     renderAccommodationDashboard(root, user);
+    return;
+  }
+  if (isMess) {
+    renderMessDashboard(root, user);
     return;
   }
   root.innerHTML =
