@@ -1232,6 +1232,21 @@ Claude-Session: https://claude.ai/code/session_01XaHNhdFsr4nRrniGgw2gbJ"
 
 Backend is now complete and fully tested — Tasks 6-7 build the frontend against it.
 
+**Post-Task-5 fix (discovered during execution, not anticipated by this plan):** after all
+five backend tasks landed, the fast bucket had grown to 36 tests and started intermittently
+returning Apps Script's "Exceeded maximum execution time" error (observed live across 3
+consecutive attempts, not a one-off) — the same 6-minute-ceiling problem Phase 4's two
+PDF-heavy tests originally caused, just from accumulated Sheets API round-trip cost instead of
+PDF generation this time. Fixed the same way Task 1 anticipated: the 7 Mess tests that call
+`_makeMessTestFixture_` (`mess_resolveToken_successAndEachRejectionReason`,
+`mess_resolveByCouponId_lostCouponLookup`, all three `mess_recordUsage_*` tests,
+`mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements`, `mess_todaysSummary_aggregatesByTeam`)
+are now flagged `slow: true` too — `mess_timeWindowMath` and `mess_currentMeal_picksConfiguredWindow`
+stay fast (no fixture, trivial cost). Fast bucket: 29/29 passing; slow bucket: 10/10 passing —
+both comfortably clear of the ceiling. `Main.gs`'s comment on `system.selfTestSplit` was
+broadened to describe `slow` as "real per-test cost" generally, not document-generation
+specifically.
+
 ---
 
 ## Task 6: Frontend — Mess Dashboard, Current Meal, and Today's Summary screens

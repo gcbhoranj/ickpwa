@@ -1297,13 +1297,19 @@ const TEST_CASES = [
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, slow: true },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
-  { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason },
-  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup },
-  { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario },
-  { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement },
-  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam },
-  { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements },
-  { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam }
+  // These all call _makeMessTestFixture_ (registerTeam_ + FOOD_PACKAGES + FOOD_COUPONS +
+  // MEAL_ENTITLEMENTS + full teardown, several sequential Sheets API round trips each) —
+  // with 7 of them the fast bucket started intermittently hitting Apps Script's 6-minute
+  // execution ceiling (observed live, not guessed, verifying this exact phase), the same
+  // problem Phase 4's two PDF-heavy tests caused originally. Flagged slow for the same
+  // reason: real per-test cost, not document generation specifically.
+  { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason, slow: true },
+  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup, slow: true },
+  { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario, slow: true },
+  { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement, slow: true },
+  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam, slow: true },
+  { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements, slow: true },
+  { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam, slow: true }
 ];
 
 function runAllTests_() {
