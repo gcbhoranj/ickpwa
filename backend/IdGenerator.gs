@@ -16,6 +16,26 @@ function nextId_(prefix, padding) {
   }
 }
 
+// Bulk form of nextId_ — one lock acquisition/SETTINGS read-write for N ids instead of N.
+// See SheetHelpers.gs's appendRows_ for why this matters at real team-size scale.
+function nextIdBatch_(prefix, count, padding) {
+  padding = padding || ID_PADDING_OVERRIDES[prefix] || 4;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const key = 'Counter_' + prefix + '_Next';
+    const current = parseInt(getSetting_(key, '1'), 10);
+    setSetting_(key, String(current + count), 'system');
+    const ids = [];
+    for (let i = 0; i < count; i++) {
+      ids.push(prefix + '-' + String(current + i).padStart(padding, '0'));
+    }
+    return ids;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Admin-configurable document numbers (Registration/Receipt/Coupon/Refund/Relieving/
 // Accommodation) — distinct from nextId_'s internal record IDs. Reads
 // Numbering_<type>_Prefix/Next/Padding from SETTINGS (seeded by Phase 1's seedSettings_).

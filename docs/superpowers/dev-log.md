@@ -221,3 +221,85 @@ thing (`ALREADY_CALCULATED` / `ALREADY_PAID` / `ALREADY_GENERATED` / `DUPLICATE`
 the rare case the original call had actually already succeeded server-side, the retry
 surfaces one of those clear "already done" errors instead of silently duplicating data,
 a large improvement over the unhandled crash it replaces.
+
+## 2026-08-19 — Phase 4 (Food Packages & Coupons) complete
+
+Built directly from the committed spec (§7, §10, §14, §8) at the human's explicit direction —
+no separate brainstorming/plan-approval round this phase, implemented straight through with
+live verification at each step, same rigor as every other phase.
+
+- **Package purchase** (`FoodPackages.gs`): mandatory Package 1, rolling Package 2/3+, each a
+  fixed Dinner + next-day Breakfast + next-day Lunch window. Package 1 defaults to today
+  (clamped into the tournament date range); Package N>1 defaults to the day after Package
+  N-1's Dinner date, so coverage rolls forward with no gaps unless the operator explicitly
+  overrides the date. `EligiblePersons` is a per-package snapshot — team members, plus
+  incharges only if the operator opts in for that specific package — and `Amount` is the
+  three-meal rate sum × EligiblePersons. One `FOOD_COUPONS` row (one QR token) is issued per
+  package, one `PRINTED_COUPONS` row per eligible person, three `MEAL_ENTITLEMENTS` rows
+  (Dinner/Breakfast/Lunch), and one `PAYMENTS` row (`Purpose: ADDITIONAL_PACKAGE`) — all in
+  the same action, matching the spec's single-step "purchase" framing (unlike registration's
+  separate charge/pay steps). **Resend** re-sends the existing digital coupon PDF, never a
+  new row. **Reprint** starts a new `PrintBatchId` for the same `CouponId`/QR, never a new
+  package/coupon/QR (recommendation §11).
+- **QR token shortened** from a full UUID (36 chars) to 12 hex characters (~2.8×10^14
+  possibilities — still astronomically unguessable at this project's scale) — smaller QR
+  version, fewer modules, meaningfully faster document generation.
+- **Digital coupon & printed-coupon A4 sheet** (`CouponDocuments.gs`): same template-holds-
+  page-size pattern as the temporary receipt (Phase 3.5), content built fresh per generation
+  with real values via text boxes/shapes, never `SlidesApp.Table` or `replaceAllText` tokens.
+  The printed sheet is a 2×5 grid of 3"×2" cells with cut-guide borders, computing how many
+  A4 pages a package's eligible-person count needs and leaving blank space on the final page
+  rather than stretching (spec §36). Digital coupon layout was redesigned mid-phase to match
+  a reference design the human supplied (`HPUICK_Meal_Coupon_Design.pdf`): dark-green header/
+  footer bars, a gold "PACKAGE N" badge, a light QR panel, and labeled team/incharge fields —
+  verified by generating a real PDF and reading it back, not just trusting the code.
+- **Meal timing settings**, added at the human's explicit request mid-phase: Admin now sets
+  Breakfast/Lunch/Dinner start/end times plus a grace-minutes tolerance (defaults 07:30-09:30,
+  12:30-14:30, 19:30-21:00, ±10 min, matching the values the human specified) through a real
+  Settings screen. Stored and validated now; actually *enforcing* a scan-time window against
+  these is Phase 5's job (the Mess scanning utility) — this phase only makes them
+  configurable and visible to that future validity check.
+- **Two real bugs found and fixed live, not guessed**, both by generating a real PDF/timing a
+  real call and inspecting the actual result:
+  - A single `slide.insertTextBox('', ...)` (an incharge with a blank designation on file)
+    then styling that empty text box threw `"The object (...) has no text"` — every coupon
+    field can legitimately be blank, so the field-rendering helper now falls back to "—" for
+    any null/undefined/empty value, not just the ones that happened to get tested first.
+  - `updateMealTimings_`'s own test tried to restore the settings to their pre-test values in
+    a `finally` block — but meal timings had never been configured through the app before
+    this phase (blank since Phase 1's seed), so "restore to original" meant restoring to
+    blank, which fails the same validation the update itself enforces. Fixed by not
+    restoring: the real requested default values are the correct end state, not a side
+    effect to undo — this also happens to be how the live Sheet's meal timings got populated
+    with real values for the first time.
+- **Performance investigation, resolved twice**: purchasing a package for as few as 3 people
+  initially measured ~48-55 seconds — traced live (via a temporary, fully-removed timing
+  diagnostic, same technique as Phase 3.5's receipt-fix investigation) to two causes: (1)
+  `nextId_`/`appendRow_` calls one-per-row for meal entitlements and printed coupons, each a
+  separate Sheets API round trip that scales with team size — fixed with bulk
+  `nextIdBatch_`/`appendRows_` helpers (`IdGenerator.gs`/`SheetHelpers.gs`) that allocate N
+  ids and write N rows in one call each; (2) `qrDrawOnSlide_` drawing a QR as hundreds of
+  individual `SlidesApp.insertShape()` calls, ~12s/QR. A second attempt at (2) — batching all
+  of a QR's shapes into one Advanced Slides API `Presentations.batchUpdate` call — measured
+  much faster but proved *unreliable* live: intermittent `"the page could not be found"`
+  errors partway through an otherwise-successful request array, at a different position each
+  time, surviving a same-chunk retry. Reverted that specific optimization back to the
+  basic-service approach (reliable, ~12s/QR) rather than accept a correctness risk in a
+  document coupons and future mess-scanning depend on — the original *actual* problem
+  (avoiding Apps Script's 6-minute execution limit) is fully solved by the id/row batching
+  above (individual purchases now complete in ~30s, safely under the limit) without needing
+  the risky QR optimization at all.
+- **`system.selfTestSplit`, new permanent capability**: the test suite has permanently
+  outgrown one Apps Script execution (the two PDF-heavy food-package tests alone run
+  ~130-150s, on top of ~180-195s for everything else — close enough to the 6-minute ceiling
+  to occasionally not return at all). `system.selfTest` is unchanged for whenever the full
+  suite does fit; `system.selfTestSplit` (same `AllowSelfTest` gate) runs either the slow
+  tests or everything else, so both halves can be verified reliably. All 28 tests pass
+  (26 + 2) verified this way.
+- Frontend: Team Detail gains a "Food Packages" screen (`packages.js`) — list existing
+  packages with links to the digital/printed coupon PDFs, Resend/Reprint buttons, and a
+  purchase form (include-incharges checkbox, optional Dinner-date override, payment mode).
+  Settings screen gains the meal-timing form described above.
+- Explicitly NOT built yet (Phase 5): the Mess QR scanner itself, the 10-point scan validity
+  check (including the meal-timing grace window this phase only stored), group mess entry,
+  excess-claim prevention, and meal order status.

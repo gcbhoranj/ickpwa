@@ -327,6 +327,45 @@ function test_settings_updateRatesAndLock() {
   setFinancialLock_(adminSession, false); // restore unlocked state for later tasks/tests
 }
 
+function test_settings_mealTimingsValidationAndUpdate() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+  const original = getMealTimings_(adminSession);
+
+  let threwForbidden = false;
+  try {
+    updateMealTimings_(messSession, original);
+  } catch (err) {
+    threwForbidden = true;
+    assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin meal timing update');
+  }
+  assertTrue_(threwForbidden, 'updateMealTimings_ did not reject a non-admin caller');
+
+  let threwBadRange = false;
+  try {
+    updateMealTimings_(adminSession, {
+      breakfastStart: '09:30', breakfastEnd: '07:30', // reversed — should be rejected
+      lunchStart: original.lunchStart, lunchEnd: original.lunchEnd,
+      dinnerStart: original.dinnerStart, dinnerEnd: original.dinnerEnd, graceMinutes: 10
+    });
+  } catch (err) {
+    threwBadRange = true;
+    assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong error code for a start-after-end meal window');
+  }
+  assertTrue_(threwBadRange, 'updateMealTimings_ did not reject start >= end');
+
+  // No `finally`-restore here on purpose: unlike rates (which start real from Phase 1), meal
+  // timings started blank/unconfigured (never set through the app before Phase 4), so there
+  // is no valid prior state to restore to — `original` itself fails validation. Setting real
+  // values and leaving them set is the correct end state, not a side effect to undo.
+  const updated = updateMealTimings_(adminSession, {
+    breakfastStart: '07:30', breakfastEnd: '09:30', lunchStart: '12:30', lunchEnd: '14:30',
+    dinnerStart: '19:30', dinnerEnd: '21:00', graceMinutes: 10
+  });
+  assertEqual_(updated.breakfastStart, '07:30', 'meal timing update did not take effect');
+  assertEqual_(updated.graceMinutes, '10', 'grace minutes did not round-trip');
+}
+
 function test_registration_registerTeam_validationAndCreation() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   let createdTeamId = null;
@@ -773,6 +812,119 @@ function test_qrEncoder_structuralValidity() {
   assertTrue_(threwTooLong, 'qrEncode_ did not reject a token too long for supported QR versions');
 }
 
+function test_foodPackages_purchaseCreatesEverythingCorrectly() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  const createdPackageIds = [];
+  const trashFileIds = [];
+  try {
+    // Kept deliberately small (2 members, 2 incharges): eligiblePersons drives both the
+    // number of Slides shapes drawn (a QR per printed coupon) and this test's own cleanup
+    // calls, and neither needs a realistic team size to prove the counting/rolling logic —
+    // a larger fixture here was a measured, live-confirmed contributor to system.selfTest
+    // itself running long enough to risk Apps Script's 6-minute execution limit.
+    const team = registerTeam_(regSession, 'Package Test College', 'District', 2, [
+      { name: 'Coach One', isPrimary: true }, { name: 'Coach Two' }
+    ]);
+    createdTeamId = team.teamId;
+    const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
+    const rateLunch = Number(getSetting_('RateLunch', '0'));
+    const rateDinner = Number(getSetting_('RateDinner', '0'));
+
+    const pkg1 = purchasePackage_(regSession, createdTeamId, false, null, 'Cash', null);
+    createdPackageIds.push(pkg1.packageId);
+    trashFileIds.push(pkg1.digitalCouponFileId, pkg1.printedCouponFileId);
+
+    assertEqual_(pkg1.packageNumber, 1, 'first package should be PackageNumber 1');
+    assertEqual_(pkg1.eligiblePersons, 2, 'eligiblePersons should be team members only when incharges excluded');
+    assertEqual_(pkg1.amount, (rateBreakfast + rateLunch + rateDinner) * 2, 'package amount miscalculated');
+    assertEqual_(pkg1.endMeal, _addDays_(pkg1.startMeal, 1), 'endMeal should be exactly one day after startMeal');
+    assertTrue_(!!pkg1.digitalCouponFileId, 'digital coupon PDF should have been generated');
+    assertTrue_(!!pkg1.printedCouponFileId, 'printed coupon sheet PDF should have been generated');
+    assertEqual_(pkg1.emailStatus, 'NOT_SENT', 'no incharge has an email address, so nothing should have been sent');
+
+    const entitlements = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', pkg1.packageId);
+    assertEqual_(entitlements.length, 3, 'expected exactly 3 meal entitlements per package');
+    const meals = entitlements.map(function (e) { return e.Meal; }).sort();
+    assertEqual_(meals.join(','), 'BREAKFAST,DINNER,LUNCH', 'expected Dinner + next-day Breakfast + Lunch');
+    entitlements.forEach(function (e) {
+      assertEqual_(Number(e.EligiblePersons), 2, 'each entitlement should carry the package eligiblePersons');
+    });
+
+    const printedCoupons = findRowsByField_('PRINTED_COUPONS', 'PackageId', pkg1.packageId);
+    assertEqual_(printedCoupons.length, 2, 'expected one printed coupon per eligible person');
+    assertTrue_(printedCoupons.every(function (c) { return Number(c.PrintBatchId) === 1; }), 'initial purchase should be print batch 1');
+
+    const payments = findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).filter(function (p) { return p.Purpose === 'ADDITIONAL_PACKAGE'; });
+    assertEqual_(payments.length, 1, 'expected exactly one ADDITIONAL_PACKAGE payment row');
+    assertEqual_(Number(payments[0].Amount), pkg1.amount, 'payment amount should match package amount');
+
+    // Rolling: package 2 should continue right where package 1's Lunch left off, and
+    // including incharges this time changes eligiblePersons independently per package.
+    const pkg2 = purchasePackage_(regSession, createdTeamId, true, null, 'Cash', null);
+    createdPackageIds.push(pkg2.packageId);
+    trashFileIds.push(pkg2.digitalCouponFileId, pkg2.printedCouponFileId);
+    assertEqual_(pkg2.packageNumber, 2, 'second package should be PackageNumber 2');
+    assertEqual_(pkg2.eligiblePersons, 4, 'eligiblePersons should include incharges when the operator opts in');
+    assertEqual_(pkg2.startMeal, pkg1.endMeal, 'package 2 should start the day package 1 ended — rolling, no gap');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    createdPackageIds.forEach(function (packageId) {
+      findRowsByField_('PRINTED_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
+      deleteRowById_('FOOD_PACKAGES', 'PackageId', packageId);
+    });
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+function test_foodPackages_resendAndReprint() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  let createdPackageId = null;
+  const trashFileIds = [];
+  try {
+    const team = registerTeam_(regSession, 'Resend Reprint Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    const pkg = purchasePackage_(regSession, createdTeamId, false, null, 'Cash', null);
+    createdPackageId = pkg.packageId;
+    trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
+
+    // Resend never creates a new row/PDF — same fileId before and after.
+    const resend = resendCoupon_(regSession, pkg.packageId, ['not-a-real-inbox@example.invalid']);
+    assertTrue_(resend.status === 'SENT' || resend.status === 'FAILED', 'resend should report SENT or FAILED, never throw, per spec §11');
+    const afterResend = findRowById_('FOOD_PACKAGES', 'PackageId', pkg.packageId);
+    assertEqual_(afterResend.values.DigitalCouponPdfFileId, pkg.digitalCouponFileId, 'resend must not generate a new digital coupon PDF');
+
+    // Reprint creates a NEW print batch for the SAME coupon/QR — never a new package/coupon.
+    const reprint = reprintCoupon_(regSession, pkg.packageId);
+    trashFileIds.push(reprint.printedCouponFileId);
+    assertEqual_(reprint.printBatchId, 2, 'reprint should start a new batch numbered 2');
+    const allPrinted = findRowsByField_('PRINTED_COUPONS', 'PackageId', pkg.packageId);
+    assertEqual_(allPrinted.length, 4, 'expected 2 original + 2 reprinted coupons (eligiblePersons=2, two batches)');
+    const coupons = findRowsByField_('FOOD_COUPONS', 'PackageId', pkg.packageId);
+    assertEqual_(coupons.length, 1, 'reprint must not create a new FOOD_COUPONS row — same QR throughout');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdPackageId) {
+      findRowsByField_('PRINTED_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
+      deleteRowById_('FOOD_PACKAGES', 'PackageId', createdPackageId);
+    }
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -789,6 +941,7 @@ const TEST_CASES = [
   { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
   { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
+  { name: 'settings_mealTimingsValidationAndUpdate', fn: test_settings_mealTimingsValidationAndUpdate },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
   { name: 'registration_calculateCharges_uncheckedItemsAreZeroAndOmitted', fn: test_registration_calculateCharges_uncheckedItemsAreZeroAndOmitted },
@@ -799,7 +952,9 @@ const TEST_CASES = [
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
-  { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity }
+  { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
+  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly },
+  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint }
 ];
 
 function runAllTests_() {

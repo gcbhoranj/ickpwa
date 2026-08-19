@@ -21,12 +21,13 @@ function seedSettings_() {
     RateDari: '100',
     SecurityAmount: '0',
     FinancialSettingsLocked: 'false',
-    MealTimingBreakfastStart: '',
-    MealTimingBreakfastEnd: '',
-    MealTimingLunchStart: '',
-    MealTimingLunchEnd: '',
-    MealTimingDinnerStart: '',
-    MealTimingDinnerEnd: '',
+    MealTimingBreakfastStart: '07:30',
+    MealTimingBreakfastEnd: '09:30',
+    MealTimingLunchStart: '12:30',
+    MealTimingLunchEnd: '14:30',
+    MealTimingDinnerStart: '19:30',
+    MealTimingDinnerEnd: '21:00',
+    MealTimingGraceMinutes: '10',
     Numbering_Registration_Prefix: 'GCB/HPUICK/REG-',
     Numbering_Registration_Next: '1',
     Numbering_Registration_Padding: '3',
@@ -97,4 +98,13 @@ function setupDriveFolders_() {
 // remove/disable after the one-time authorization is done.
 function authorizeDriveManually() {
   return setupDriveFolders_();
+}
+
+// Same pattern, for GmailApp — Phase 4's coupon emails are the first thing in this project
+// to use the Gmail scope. Run once from the Apps Script editor's Run dropdown (as the script
+// owner, gcbhoranj@gmail.com) to click through the one-time consent dialog; sends a no-op
+// email to the account itself so nothing external is touched by the authorization step.
+function authorizeGmailManually() {
+  GmailApp.sendEmail(Session.getActiveUser().getEmail() || 'gcbhoranj@gmail.com', 'HPUICK Gmail authorization', 'This is a one-time authorization check — safe to ignore.');
+  return { authorized: true };
 }

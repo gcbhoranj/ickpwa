@@ -284,13 +284,29 @@ function qrEncode_(text) {
   return { size: size, matrix: matrix, version: version };
 }
 
-// Draws a QR matrix onto a Slide as a grid of solid-fill rectangle shapes, inside a
-// `moduleCount x moduleCount` region starting at (left, top) with each module
-// `moduleSizePt` points square — no image blob or rasterization needed, staying entirely
-// within the well-documented SlidesApp shape API. Adjacent same-color modules in a row are
-// merged into one wider rectangle to keep the shape count (and generation time) down. A
-// white quiet-zone rectangle is drawn first so the code reads correctly against any
-// background the template places it over.
+// Appends the batchUpdate requests needed to draw one QR matrix as a grid of solid-fill
+// rectangle shapes onto `pageObjectId`, inside a `moduleCount x moduleCount` region starting
+// at (left, top) with each module `moduleSizePt` points square. Adjacent same-color modules
+// in a row are merged into one wider rectangle to keep the shape count down. A white
+// quiet-zone rectangle is drawn first so the code reads correctly against any background.
+// `idPrefix` must be unique per QR instance within the presentation (object IDs are
+// presentation-wide) — e.g. include a page/cell index when drawing many QRs across a sheet.
+//
+// History: an earlier version of this function used the Advanced Slides Service's
+// `Presentations.batchUpdate` to send every shape for one QR in a single network round-trip,
+// instead of one round-trip per shape via the basic SlidesApp service — measured ~12 seconds
+// per QR with the basic service, a genuine problem (a single food-package purchase took up
+// to 48 seconds, and system.selfTest's several packages together blew past Apps Script's
+// 6-minute execution limit). The batched version was FASTER but proved unreliable live: for
+// this document's QR (a few hundred shapes), `batchUpdate` intermittently failed partway
+// through a single request array with "the page could not be found" — on a page every
+// surrounding request in the same call addressed successfully — at a different, seemingly
+// random position each time, including after a same-chunk retry. That's a correctness risk
+// this project won't accept for a document coupons/mess-scanning ultimately depend on.
+// Reverted to the slower-but-reliable basic-service approach; the original speed problem is
+// instead solved by keeping single actions safely fast (already true — a purchase completes
+// in well under Apps Script's execution limit even at ~12s/QR) and by system.selfTestSplit
+// (Main.gs) for the test suite, which no longer needs to fit in one execution.
 function qrDrawOnSlide_(slide, qr, left, top, moduleSizePt) {
   const quietZoneModules = 4; // ISO/IEC 18004 minimum quiet zone
   const totalModules = qr.size + quietZoneModules * 2;

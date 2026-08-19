@@ -38,6 +38,58 @@ function updateRates_(actorSession, rates) {
   return getRegistrationInfo_(actorSession);
 }
 
+// Meal timing windows — set by Admin here so the future Mess scanning utility (Phase 5) can
+// tell which meal a scan belongs to. `graceMinutes` is a single tolerance applied on both
+// sides of every window (e.g. Breakfast 07:30-09:30 with a 10-minute grace accepts a scan
+// from 07:20 to 09:40) — the actual accept/reject check itself is Phase 5's job; this phase
+// only makes the windows configurable and stored, not yet enforced anywhere.
+function getMealTimings_(actorSession) {
+  return {
+    breakfastStart: getSetting_('MealTimingBreakfastStart', ''), breakfastEnd: getSetting_('MealTimingBreakfastEnd', ''),
+    lunchStart: getSetting_('MealTimingLunchStart', ''), lunchEnd: getSetting_('MealTimingLunchEnd', ''),
+    dinnerStart: getSetting_('MealTimingDinnerStart', ''), dinnerEnd: getSetting_('MealTimingDinnerEnd', ''),
+    graceMinutes: getSetting_('MealTimingGraceMinutes', '10')
+  };
+}
+
+function _validateTimeOfDay_(value, label) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    throw apiError_('VALIDATION_ERROR', label + ' must be a 24-hour HH:MM time.');
+  }
+}
+
+function updateMealTimings_(actorSession, timings) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  const pairs = [
+    ['breakfastStart', 'breakfastEnd', 'Breakfast'], ['lunchStart', 'lunchEnd', 'Lunch'], ['dinnerStart', 'dinnerEnd', 'Dinner']
+  ];
+  pairs.forEach(function (p) {
+    _validateTimeOfDay_(timings[p[0]], p[2] + ' start');
+    _validateTimeOfDay_(timings[p[1]], p[2] + ' end');
+    if (timings[p[0]] >= timings[p[1]]) {
+      throw apiError_('VALIDATION_ERROR', p[2] + ' start must be before ' + p[2].toLowerCase() + ' end.');
+    }
+  });
+  const grace = parseInt(timings.graceMinutes, 10);
+  if (isNaN(grace) || grace < 0) {
+    throw apiError_('VALIDATION_ERROR', 'Grace minutes must be a non-negative number.');
+  }
+
+  const now = new Date().toISOString();
+  setSetting_('MealTimingBreakfastStart', timings.breakfastStart, actorSession.userId);
+  setSetting_('MealTimingBreakfastEnd', timings.breakfastEnd, actorSession.userId);
+  setSetting_('MealTimingLunchStart', timings.lunchStart, actorSession.userId);
+  setSetting_('MealTimingLunchEnd', timings.lunchEnd, actorSession.userId);
+  setSetting_('MealTimingDinnerStart', timings.dinnerStart, actorSession.userId);
+  setSetting_('MealTimingDinnerEnd', timings.dinnerEnd, actorSession.userId);
+  setSetting_('MealTimingGraceMinutes', String(grace), actorSession.userId);
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'UPDATE_MEAL_TIMINGS', Entity: 'SETTINGS', EntityId: 'MEAL_TIMINGS', PreviousState: '', NewState: JSON.stringify(timings)
+  });
+  return getMealTimings_(actorSession);
+}
+
 function setFinancialLock_(actorSession, locked) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   const now = new Date().toISOString();

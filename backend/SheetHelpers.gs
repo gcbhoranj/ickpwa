@@ -62,6 +62,25 @@ function appendRow_(sheetName, obj) {
   return obj;
 }
 
+// Bulk form of appendRow_ — one Sheets API round trip for N rows instead of N. Matters at
+// real scale: FoodPackages.gs's printed-coupon batch writes one row per eligible person, and
+// a college contingent can run 15-25+ people — N individual appendRow_ calls there was a
+// measured, live-confirmed contributor to a single package purchase taking tens of seconds
+// (see FoodPackages.gs's header note). Same plain-text-before-write safety as appendRow_.
+function appendRows_(sheetName, objs) {
+  if (!objs || objs.length === 0) return objs;
+  const sheet = getSheet_(sheetName);
+  const headers = SHEET_SCHEMAS[sheetName];
+  const rows = objs.map(function (obj) {
+    return headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
+  });
+  const startRow = sheet.getLastRow() + 1;
+  const targetRange = sheet.getRange(startRow, 1, rows.length, headers.length);
+  targetRange.setNumberFormat('@');
+  targetRange.setValues(rows);
+  return objs;
+}
+
 function rowsToObjects_(sheetName) {
   const sheet = getSheet_(sheetName);
   const headers = SHEET_SCHEMAS[sheetName];

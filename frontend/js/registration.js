@@ -245,7 +245,11 @@ async function renderTeamDetail(root, user, teamId) {
       (receipt
         ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'
         : '<p>No receipt generated yet.</p>') +
+      '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
+  document.getElementById('packages-btn').addEventListener('click', function () {
+    navigateTo(renderPackagesScreen, root, user, teamId, data.team.RegistrationNumber);
+  });
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }

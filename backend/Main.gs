@@ -41,6 +41,29 @@ const ACTIONS = {
     }
     return runAllTests_();
   },
+  // Since Phase 4, the full test suite no longer reliably completes inside one Apps Script
+  // execution (the two PDF-heavy food-package tests alone measured ~130-150s, on top of
+  // ~180-195s for everything else — close enough to the 6-minute ceiling to occasionally not
+  // return at all; see dev-log). `payload.only: 'slow'` runs just the tests known to do real
+  // Slides/Drive document generation (currently the food-package ones); omit it to run
+  // everything else. Same AllowSelfTest gate and non-production intent as system.selfTest.
+  'system.selfTestSplit': function (payload) {
+    if (getSetting_('AllowSelfTest', 'false') !== 'true') {
+      throw apiError_('FORBIDDEN', 'Self-test is disabled.');
+    }
+    const wantSlow = payload && payload.only === 'slow';
+    const cases = TEST_CASES.filter(function (tc) { return (tc.name.indexOf('foodPackages') !== -1) === wantSlow; });
+    const results = cases.map(function (testCase) {
+      try {
+        testCase.fn();
+        return { name: testCase.name, status: 'PASS' };
+      } catch (err) {
+        return { name: testCase.name, status: 'FAIL', error: err.message };
+      }
+    });
+    const passCount = results.filter(function (r) { return r.status === 'PASS'; }).length;
+    return { summary: passCount + '/' + results.length + ' passed', results: results };
+  },
   'admin.bootstrap.setupSchema': function (payload, sessionId) {
     requireRole_(requireSession_(sessionId), [ROLES.ADMIN]);
     return { sheetsEnsured: setupSchema_() };
@@ -93,6 +116,14 @@ const ACTIONS = {
     requireSession_(sessionId);
     return getRegistrationInfo_(null);
   },
+  'admin.settings.getMealTimings': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getMealTimings_(session);
+  },
+  'admin.settings.updateMealTimings': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return updateMealTimings_(session, payload);
+  },
   'registration.team.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);
@@ -136,6 +167,22 @@ const ACTIONS = {
   'accommodation.allocateRoom': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return allocateRoom_(session, payload.teamId, payload.roomId, payload.personsAllocated, payload.kind);
+  },
+  'registration.package.purchase': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return purchasePackage_(session, payload.teamId, payload.includeIncharges, payload.dinnerDate, payload.mode, payload.recipientEmails);
+  },
+  'registration.package.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { packages: listPackages_(session, payload.teamId) };
+  },
+  'registration.package.resend': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resendCoupon_(session, payload.packageId, payload.recipientEmails);
+  },
+  'registration.package.reprint': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return reprintCoupon_(session, payload.packageId);
   }
 };
 
