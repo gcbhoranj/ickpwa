@@ -405,6 +405,39 @@ function test_registration_calculateCharges_correctAndIdempotentGuard() {
   }
 }
 
+function test_registration_calculateCharges_uncheckedItemsAreZeroAndOmitted() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Unchecked Charges Test College', 'District', 9, [
+      { name: 'Incharge A', isPrimary: true }
+    ]);
+    createdTeamId = team.teamId;
+
+    // Dari left unticked, Security ticked.
+    const charges = calculateCharges_(regSession, createdTeamId, false, true);
+    const security = Number(getSetting_('SecurityAmount', '0'));
+    assertEqual_(charges.dariCharges, 0, 'dari charges should be 0 when left unticked');
+    assertEqual_(charges.securityCharges, security, 'security should still be charged when ticked');
+    assertEqual_(charges.totalPayable, security, 'total payable should exclude the unticked item');
+
+    recordPayment_(regSession, createdTeamId, 'CASH');
+    const receipt = generateTemporaryReceipt_(regSession, createdTeamId);
+    assertTrue_(!!receipt.pdfFileId, 'receipt generation should still succeed with one item unticked');
+    const receiptRow = findRowById_('RECEIPTS', 'ReceiptId', receipt.receiptId);
+    assertEqual_(Number(receiptRow.values.GrandTotal), 0, 'GrandTotal (charges only, never security) should be 0 when Dari was unticked');
+    DriveApp.getFileById(receipt.pdfFileId).setTrashed(true);
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 function test_registration_recordPayment_createsTwoRowsAndGuards() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   let createdTeamId = null;
@@ -758,6 +791,7 @@ const TEST_CASES = [
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
+  { name: 'registration_calculateCharges_uncheckedItemsAreZeroAndOmitted', fn: test_registration_calculateCharges_uncheckedItemsAreZeroAndOmitted },
   { name: 'registration_recordPayment_createsTwoRowsAndGuards', fn: test_registration_recordPayment_createsTwoRowsAndGuards },
   { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData },
   { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },

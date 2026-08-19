@@ -101,27 +101,57 @@ function renderRegisterWizard(root, user) {
     });
   }
 
-  async function renderChargesStep() {
-    root.innerHTML = '<div class="wizard-card"><h1>Register Team — Step 2 of 4</h1><p>Calculating charges…</p></div>';
-    try {
-      const charges = await apiCall('registration.charges.calculate', { teamId: state.teamId });
-      state.charges = charges;
-      root.innerHTML =
-        '<div class="wizard-card">' +
-          '<h1>Register Team — Step 2 of 4</h1>' +
-          '<p class="subtitle">Registration No. ' + state.registrationNumber + '</p>' +
-          '<table><tbody>' +
-            '<tr><td>Total Contingent</td><td>' + charges.totalContingentPersons + '</td></tr>' +
-            '<tr><td>Dari Charges</td><td>Rs ' + charges.dariCharges + '</td></tr>' +
-            '<tr><td>Security (refundable, not a charge)</td><td>Rs ' + charges.securityCharges + '</td></tr>' +
-            '<tr><td><b>Total to Collect</b></td><td><b>Rs ' + charges.totalPayable + '</b></td></tr>' +
-          '</tbody></table>' +
-          '<button id="next-payment-btn">Next: Record Payment</button>' +
-        '</div>';
-      document.getElementById('next-payment-btn').addEventListener('click', function () { renderPaymentStep(); });
-    } catch (err) {
-      root.innerHTML = '<div class="wizard-card"><h1>Register Team</h1><p class="error">' + err.message + '</p></div>';
-    }
+  // Which charge items apply is the Registration operator's call, not automatic — some
+  // teams may already have paid Security elsewhere, or Dari may not apply. Only ticked
+  // items get charged (calculateCharges_ zeroes the rest) and only ticked items end up on
+  // the printed receipt (generateTemporaryReceipt_ omits any item that came back as 0).
+  function renderChargesStep() {
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Register Team — Step 2 of 4</h1>' +
+        '<p class="subtitle">Registration No. ' + state.registrationNumber + '</p>' +
+        '<p>Tick which charges apply to this team. Unticked items are not charged and will not appear on the receipt.</p>' +
+        '<div id="wizard-error" class="error" style="display:none"></div>' +
+        '<form id="charges-select-form">' +
+          '<label><input type="checkbox" id="include-dari" checked> Dari Charges</label>' +
+          '<label><input type="checkbox" id="include-security" checked> Security (refundable)</label>' +
+          '<button type="submit">Calculate Charges</button>' +
+        '</form>' +
+      '</div>';
+
+    document.getElementById('charges-select-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const errEl = document.getElementById('wizard-error');
+      errEl.style.display = 'none';
+      try {
+        const charges = await apiCall('registration.charges.calculate', {
+          teamId: state.teamId,
+          includeDari: document.getElementById('include-dari').checked,
+          includeSecurity: document.getElementById('include-security').checked
+        });
+        state.charges = charges;
+        renderChargesSummary(charges);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+  }
+
+  function renderChargesSummary(charges) {
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Register Team — Step 2 of 4</h1>' +
+        '<p class="subtitle">Registration No. ' + state.registrationNumber + '</p>' +
+        '<table><tbody>' +
+          '<tr><td>Total Contingent</td><td>' + charges.totalContingentPersons + '</td></tr>' +
+          (charges.dariCharges > 0 ? '<tr><td>Dari Charges</td><td>Rs ' + charges.dariCharges + '</td></tr>' : '') +
+          (charges.securityCharges > 0 ? '<tr><td>Security (refundable, not a charge)</td><td>Rs ' + charges.securityCharges + '</td></tr>' : '') +
+          '<tr><td><b>Total to Collect</b></td><td><b>Rs ' + charges.totalPayable + '</b></td></tr>' +
+        '</tbody></table>' +
+        '<button id="next-payment-btn">Next: Record Payment</button>' +
+      '</div>';
+    document.getElementById('next-payment-btn').addEventListener('click', function () { renderPaymentStep(); });
   }
 
   function renderPaymentStep() {
@@ -207,7 +237,10 @@ async function renderTeamDetail(root, user, teamId) {
       '<h2>Incharges</h2>' +
       '<ul>' + data.incharges.map(function (i) { return '<li>' + i.Name + (i.IsPrimary === 'true' ? ' (Primary)' : '') + '</li>'; }).join('') + '</ul>' +
       (data.charges
-        ? '<p>Dari: Rs ' + data.charges.DariCharges + ' &middot; Security: Rs ' + data.charges.SecurityCharges + '</p>'
+        ? '<p>' + [
+            Number(data.charges.DariCharges) > 0 ? 'Dari: Rs ' + data.charges.DariCharges : null,
+            Number(data.charges.SecurityCharges) > 0 ? 'Security: Rs ' + data.charges.SecurityCharges : null
+          ].filter(function (s) { return s; }).join(' &middot; ') + '</p>'
         : '<p>Charges not yet calculated.</p>') +
       (receipt
         ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'

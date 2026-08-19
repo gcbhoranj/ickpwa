@@ -1,17 +1,20 @@
-// Receipts.gs — temporary receipt template setup and generation (Google Slides → PDF).
+// Receipts.gs — temporary receipt generation (Google Slides → PDF).
 // Slides mechanics verified live before this task was written: SlidesApp.create/
-// replaceAllText/getAs('application/pdf') all work reliably; custom page sizing does not —
-// neither SlidesApp nor the Advanced Slides API's presentations.create({pageSize}) honors a
-// requested size (confirmed via a live spike, not assumed). That is a platform limitation,
-// not something this code can route around: the one working mechanism is a ONE-TIME manual
-// resize of the TEMPLATE file itself via the Slides UI (File > Page setup > Custom size) —
-// done once for this project, A5 portrait (14.8cm x 21.0cm). Every future makeCopy() of the
-// template inherits that page size. `createTemporaryReceiptTemplate_`'s rebuild path (force)
-// therefore clears and repopulates the EXISTING template file in place rather than deleting
-// and recreating it — recreating would throw away the manual resize and put a fresh
-// default-landscape presentation back in its place. Content layout below reads the page's
-// actual width/height at generation time (getPageWidth/getPageHeight) rather than hardcoding
-// pixel positions, so it reflows correctly whatever physical size the template has.
+// getAs('application/pdf') work reliably; custom page sizing does not — neither SlidesApp
+// nor the Advanced Slides API's presentations.create({pageSize}) honors a requested size
+// (confirmed via a live spike, not assumed). That is a platform limitation, not something
+// this code can route around: the one working mechanism is a ONE-TIME manual resize of the
+// TEMPLATE file itself via the Slides UI (File > Page setup > Custom size) — done once for
+// this project, A5 portrait (14.8cm x 21.0cm). Every future makeCopy() of the template
+// inherits that page size.
+//
+// The layout is built fresh, with real values, directly onto each receipt's own copy at
+// generation time (`_buildReceiptLayout_`) rather than pre-built once into the template and
+// text-replaced per receipt — replaceAllText tokens can't conditionally omit a line, and the
+// Registration operator needs to be able to leave Dari Charges and/or Security unticked (not
+// applicable for this team) so that line is simply absent from the receipt, not printed as
+// "0". `createTemporaryReceiptTemplate_` therefore only exists to hold the one-time page-size
+// resize; it keeps the template file's slide blank rather than pre-populating it.
 
 function _getRootFolder_() {
   const rootId = getSetting_('DriveRootFolderId', null);
@@ -24,14 +27,20 @@ function _clearSlide_(slide) {
   slide.getTables().forEach(function (table) { table.remove(); });
 }
 
-// Builds the one-page receipt layout onto slide 1 of `pres`, sized to whatever the
-// presentation's current page dimensions are (default landscape, or A5 portrait once the
-// template file has been manually resized — see file header). Kept as one simple vertical
-// stack, one field per line, so it reflows safely on a narrow portrait page without relying
-// on wide side-by-side strings that wrap unpredictably.
-function _buildReceiptLayout_(pres) {
+// Builds the one-page receipt onto slide 1 of `pres` with real values from `data`, sized to
+// whatever the presentation's current page dimensions are (default landscape, or A5 portrait
+// once the template file has been manually resized — see file header). One field per line,
+// so it reflows safely on a narrow portrait page without relying on wide side-by-side
+// strings that wrap unpredictably.
+//
+// `data.lineItems`: ordered array of { label, amount } — only items the operator ticked at
+// charge-calculation time end up here (Registration.gs's calculateCharges_ already zeroes
+// out anything left unticked), so an unticked item is simply never in this array and never
+// appears on the receipt, rather than printing as "Rs 0".
+function _buildReceiptLayout_(pres, data) {
   const slide = pres.getSlides()[0];
   _clearSlide_(slide);
+  if (!data) return slide; // template-setup call: leave the page blank, just holding its size
 
   const pageWidth = pres.getPageWidth();
   const pageHeight = pres.getPageHeight();
@@ -53,21 +62,21 @@ function _buildReceiptLayout_(pres) {
     return box;
   }
 
-  addLine('{{TOURNAMENT_NAME}}', 0.045, 11, { bold: true });
-  addLine('{{ORGANIZER}}', 0.03, 9, {});
-  addLine('{{DISTRICT_ADDRESS}}', 0.035, 8, {});
+  addLine(data.tournamentName, 0.045, 11, { bold: true });
+  addLine(data.organizer, 0.03, 9, {});
+  addLine(data.districtAddress, 0.035, 8, {});
   y += pageHeight * 0.015;
   addLine('TEMPORARY RECEIPT', 0.05, 14, { bold: true });
   y += pageHeight * 0.02;
 
-  addLine('Registration No: {{REGISTRATION_NUMBER}}', 0.03, 9, { left: true });
-  addLine('Date: {{DATE}}', 0.03, 9, { left: true });
+  addLine('Registration No: ' + data.registrationNumber, 0.03, 9, { left: true });
+  addLine('Date: ' + data.date, 0.03, 9, { left: true });
   y += pageHeight * 0.015;
 
-  addLine('Received from: {{INCHARGE_NAMES}}', 0.05, 9, { left: true });
-  addLine('College: {{COLLEGE_NAME}}', 0.035, 9, { left: true });
-  addLine('District: {{DISTRICT_NAME}}', 0.035, 9, { left: true });
-  addLine('Team Members: {{TEAM_MEMBERS}}   Incharges: {{INCHARGES_COUNT}}   Total Contingent: {{TOTAL_CONTINGENT}}', 0.045, 8.5, { left: true });
+  addLine('Received from: ' + data.inchargeNames, 0.05, 9, { left: true });
+  addLine('College: ' + data.collegeName, 0.035, 9, { left: true });
+  addLine('District: ' + data.districtName, 0.035, 9, { left: true });
+  addLine('Team Members: ' + data.teamMembers + '   Incharges: ' + data.inchargesCount + '   Total Contingent: ' + data.totalContingent, 0.045, 8.5, { left: true });
   y += pageHeight * 0.02;
 
   // The charges block was originally a SlidesApp.Table, which turned out to be a dead end:
@@ -76,10 +85,10 @@ function _buildReceiptLayout_(pres) {
   // Table.getHeight() kept reporting the small requested height, not the real rendered one,
   // so the next element's y-advance undershot and overlapped the table (confirmed against a
   // real generated PDF). Table.setColumnWidth()/TableColumn.setWidth() also don't exist on
-  // this API (both threw "is not a function" live). Rather than fight three broken/
-  // unreliable Table APIs, this block is now plain text-box rows using the same `addLine`
-  // mechanics already proven correct for every other line in this layout — no Table
-  // involved, so no auto-grow-vs-measurement mismatch is possible.
+  // this API (both threw "is not a function" live). This block is plain text-box rows using
+  // the same `addLine` mechanics already proven correct for every other line in this layout —
+  // no Table involved, so no auto-grow-vs-measurement mismatch is possible, and rows can be
+  // omitted per receipt (see `data.lineItems` above), which a static Table template couldn't do.
   const amountColWidth = contentWidth * 0.28;
   const labelColWidth = contentWidth - amountColWidth;
 
@@ -100,16 +109,14 @@ function _buildReceiptLayout_(pres) {
 
   const boxTop = y;
   addChargeRow('Description', 'Amount (Rs)', { bold: true });
-  addChargeRow('Dari Charges ({{TEAM_MEMBERS}} x Rs {{DARI_RATE}})', '{{DARI_CHARGES}}');
-  addChargeRow('Grand Total (charges)', '{{DARI_CHARGES}}');
-  addChargeRow('Security (refundable)', '{{SECURITY_AMOUNT}}');
+  data.lineItems.forEach(function (item) { addChargeRow(item.label, String(item.amount)); });
+  addChargeRow('Grand Total (charges)', String(data.grandTotalCharges));
   const boxBottom = y;
 
-  // Purely decorative border around the four rows above, drawn last (after the row text
-  // boxes it should be safe to overlap. Transparent fill so it can never visually hide the
-  // text) so the receipt keeps its original boxed/table look without an actual Table.
-  // A couple points of padding above/below so the border doesn't sit right on the first/
-  // last row's text baseline (looked like a strike-through in the first generated PDF).
+  // Purely decorative border around the rows above, drawn last (after the row text boxes —
+  // safe to overlap since it's transparent-filled) so the receipt keeps its boxed/table look
+  // without an actual Table. A couple points of padding above/below so the border doesn't sit
+  // right on the first/last row's text baseline (looked like a strike-through otherwise).
   const borderPad = pageHeight * 0.004;
   const borderRect = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, margin, boxTop - borderPad, contentWidth, (boxBottom - boxTop) + borderPad * 2);
   borderRect.getFill().setTransparent();
@@ -118,7 +125,7 @@ function _buildReceiptLayout_(pres) {
 
   y += pageHeight * 0.025;
 
-  addLine('Total Amount Received (Mode: {{PAYMENT_MODE}}): Rs {{TOTAL_RECEIVED}}', 0.06, 10, { bold: true, left: true });
+  addLine('Total Amount Received (Mode: ' + data.paymentMode + '): Rs ' + data.totalReceived, 0.06, 10, { bold: true, left: true });
   y += pageHeight * 0.02;
 
   addLine(
@@ -133,10 +140,11 @@ function _buildReceiptLayout_(pres) {
   return slide;
 }
 
-// `force`: when true, clears and rebuilds the layout on the EXISTING template file in place
-// (preserves any manual page-size resize done via the Slides UI — see file header). Default
-// (false/omitted) stays idempotent: returns the existing template untouched. When no template
-// exists yet, always creates one (default landscape size, until manually resized once).
+// `force`: when true, clears the EXISTING template file's slide back to blank in place
+// (preserves any manual page-size resize done via the Slides UI — see file header, and does
+// NOT delete/recreate the file, which would lose that resize). Default (false/omitted) stays
+// idempotent: returns the existing template untouched. When no template exists yet, always
+// creates one (default landscape size, until manually resized once).
 function createTemporaryReceiptTemplate_(actorSession, force) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   const templatesFolder = _ensureSubfolder_(_getRootFolder_(), 'Templates');
@@ -148,7 +156,7 @@ function createTemporaryReceiptTemplate_(actorSession, force) {
       return { templateId: existingFile.getId(), created: false };
     }
     const pres = SlidesApp.openById(existingFile.getId());
-    _buildReceiptLayout_(pres);
+    _buildReceiptLayout_(pres, null);
     pres.saveAndClose();
     return { templateId: existingFile.getId(), created: false };
   }
@@ -156,7 +164,7 @@ function createTemporaryReceiptTemplate_(actorSession, force) {
   const pres = SlidesApp.create('Temporary Receipt Template');
   const fileId = pres.getId();
   DriveApp.getFileById(fileId).moveTo(templatesFolder);
-  _buildReceiptLayout_(pres);
+  _buildReceiptLayout_(pres, null);
   pres.saveAndClose();
   return { templateId: fileId, created: true };
 }
@@ -192,30 +200,38 @@ function generateTemporaryReceipt_(actorSession, teamId) {
   const now = new Date();
   const receiptNumber = nextDocumentNumber_('Receipt');
 
+  // Only items the Registration operator ticked (calculateCharges_ zeroes anything left
+  // unticked) get a line on the receipt — an unticked item is absent, not "Rs 0".
+  const lineItems = [];
+  const dariCharges = Number(charge.DariCharges);
+  const securityCharges = Number(charge.SecurityCharges);
+  if (dariCharges > 0) {
+    lineItems.push({ label: 'Dari Charges (' + team.values.NumberOfTeamMembers + ' x Rs ' + charge.RateDariSnapshot + ')', amount: dariCharges });
+  }
+  if (securityCharges > 0) {
+    lineItems.push({ label: 'Security (refundable)', amount: securityCharges });
+  }
+  const totalReceived = dariCharges + securityCharges;
+
   const copyFile = templateFile.makeCopy('Temp Receipt - ' + team.values.RegistrationNumber, receiptsFolder);
   const copyId = copyFile.getId();
   const pres = SlidesApp.openById(copyId);
-  const totalReceived = Number(charge.DariCharges) + Number(charge.SecurityCharges);
-  const replacements = {
-    '{{TOURNAMENT_NAME}}': getSetting_('TournamentName', ''),
-    '{{ORGANIZER}}': getSetting_('OrganizerName', ''),
-    '{{DISTRICT_ADDRESS}}': getSetting_('DistrictAddress', ''),
-    '{{REGISTRATION_NUMBER}}': team.values.RegistrationNumber,
-    '{{DATE}}': now.toISOString().slice(0, 10),
-    '{{INCHARGE_NAMES}}': inchargeNames,
-    '{{COLLEGE_NAME}}': team.values.CollegeName,
-    '{{DISTRICT_NAME}}': team.values.DistrictName,
-    '{{TEAM_MEMBERS}}': String(team.values.NumberOfTeamMembers),
-    '{{INCHARGES_COUNT}}': String(team.values.NumberOfContingentIncharges),
-    '{{TOTAL_CONTINGENT}}': String(team.values.TotalContingentPersons),
-    '{{DARI_RATE}}': String(charge.RateDariSnapshot),
-    '{{DARI_CHARGES}}': String(charge.DariCharges),
-    '{{SECURITY_AMOUNT}}': String(charge.SecurityCharges),
-    '{{PAYMENT_MODE}}': payments[0].Mode,
-    '{{TOTAL_RECEIVED}}': String(totalReceived)
-  };
-  Object.keys(replacements).forEach(function (token) {
-    pres.replaceAllText(token, replacements[token]);
+  _buildReceiptLayout_(pres, {
+    tournamentName: getSetting_('TournamentName', ''),
+    organizer: getSetting_('OrganizerName', ''),
+    districtAddress: getSetting_('DistrictAddress', ''),
+    registrationNumber: team.values.RegistrationNumber,
+    date: now.toISOString().slice(0, 10),
+    inchargeNames: inchargeNames,
+    collegeName: team.values.CollegeName,
+    districtName: team.values.DistrictName,
+    teamMembers: team.values.NumberOfTeamMembers,
+    inchargesCount: team.values.NumberOfContingentIncharges,
+    totalContingent: team.values.TotalContingentPersons,
+    lineItems: lineItems,
+    grandTotalCharges: dariCharges, // charges only, never security — matches RECEIPTS.GrandTotal below
+    paymentMode: payments[0].Mode,
+    totalReceived: totalReceived
   });
   pres.saveAndClose();
 

@@ -99,7 +99,7 @@ const ACTIONS = {
   },
   'registration.charges.calculate': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return calculateCharges_(session, payload.teamId);
+    return calculateCharges_(session, payload.teamId, payload.includeDari, payload.includeSecurity);
   },
   'registration.payment.record': function (payload, sessionId) {
     const session = requireSession_(sessionId);

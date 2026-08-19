@@ -42,7 +42,12 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
   return { teamId: teamId, registrationNumber: registrationNumber, totalContingentPersons: totalContingent };
 }
 
-function calculateCharges_(actorSession, teamId) {
+// `includeDari`/`includeSecurity`: the Registration operator's checkboxes for this team —
+// default to included (`!== false`) so existing callers that don't pass them (older frontend
+// builds, existing tests) keep the original always-charge behavior. An item left unticked is
+// calculated as 0, which Receipts.gs's generateTemporaryReceipt_ then reads as "leave this
+// line off the receipt entirely" rather than printing it as "Rs 0".
+function calculateCharges_(actorSession, teamId, includeDari, includeSecurity) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
@@ -57,20 +62,21 @@ function calculateCharges_(actorSession, teamId) {
   const rateDinner = Number(getSetting_('RateDinner', '0'));
   const securityAmount = Number(getSetting_('SecurityAmount', '0'));
 
-  const dariCharges = rateDari * Number(team.values.NumberOfTeamMembers);
-  const totalPayable = dariCharges + securityAmount;
+  const dariCharges = includeDari !== false ? rateDari * Number(team.values.NumberOfTeamMembers) : 0;
+  const securityCharges = includeSecurity !== false ? securityAmount : 0;
+  const totalPayable = dariCharges + securityCharges;
   const chargeId = nextId_('CHG', 4);
   const now = new Date().toISOString();
 
   appendRow_('CHARGES', {
     ChargeId: chargeId, TeamId: teamId, RateBreakfastSnapshot: rateBreakfast, RateLunchSnapshot: rateLunch,
     RateDinnerSnapshot: rateDinner, RateDariSnapshot: rateDari, SecurityAmountSnapshot: securityAmount,
-    DariCharges: dariCharges, MealCharges: 0, SecurityCharges: securityAmount, TotalPayable: totalPayable,
+    DariCharges: dariCharges, MealCharges: 0, SecurityCharges: securityCharges, TotalPayable: totalPayable,
     CalculatedAt: now, CreatedBy: actorSession.userId
   });
 
   return {
-    chargeId: chargeId, dariCharges: dariCharges, securityCharges: securityAmount, totalPayable: totalPayable,
+    chargeId: chargeId, dariCharges: dariCharges, securityCharges: securityCharges, totalPayable: totalPayable,
     totalContingentPersons: Number(team.values.TotalContingentPersons)
   };
 }
