@@ -203,3 +203,21 @@ phase so this can't be forgotten a third time.
   per-team-member (as opposed to per-team) room allocation — all remain in the real future
   Phase 6; food packages/meal charges/coupons/QR remain Phase 4; mess scanning, refunds, the
   Final Receipt and its amount-in-words conversion, and reports remain later phases.
+
+### Bug found and fixed during Phase 3.5: transient "Unexpected token '<'" on API calls
+
+The human reported an occasional `Unexpected token '<', "<!DOCTYPE "... is not valid JSON`
+error from the live app. Reproduced directly (not guessed) by hitting the deployed Web App
+URL repeatedly with curl: Apps Script's response is itself a redirect to a one-time
+`script.googleusercontent.com/macros/echo?...` content URL, and that URL occasionally isn't
+ready the instant the script finishes — Google Drive serves its own "Sorry, unable to open
+the file at present" HTML page instead of the real JSON. A bare retry succeeded immediately
+every time; this is a transient Google-infrastructure timing issue, not a bug in this
+project's code. Fixed defensively in `frontend/js/api-client.js`: `apiCall` now retries once
+if parsing the response throws a `SyntaxError`. The retry re-runs the action from scratch
+(a fresh script execution, not a re-fetch of the same result), which is only safe for write
+actions because every write handler already guards against being called twice for the same
+thing (`ALREADY_CALCULATED` / `ALREADY_PAID` / `ALREADY_GENERATED` / `DUPLICATE`, etc.) — in
+the rare case the original call had actually already succeeded server-side, the retry
+surfaces one of those clear "already done" errors instead of silently duplicating data,
+a large improvement over the unhandled crash it replaces.
