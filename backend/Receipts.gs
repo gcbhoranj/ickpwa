@@ -85,7 +85,11 @@ function _buildReceiptLayout_(pres) {
       table.getCell(r, c).getText().getTextStyle().setFontSize(8);
     }
   }
-  y += tableHeight + pageHeight * 0.025;
+  // Use the table's actual rendered height, not the requested `tableHeight` — Slides
+  // auto-grows row height to fit wrapped cell text (e.g. the long Dari Charges description),
+  // so the real table is often taller than requested. Using the requested height here caused
+  // "Total Amount Received" to overlap the table's last row in practice.
+  y += table.getHeight() + pageHeight * 0.025;
 
   addLine('Total Amount Received (Mode: {{PAYMENT_MODE}}): Rs {{TOTAL_RECEIVED}}', 0.06, 10, { bold: true, left: true });
   y += pageHeight * 0.02;

@@ -530,13 +530,14 @@ function test_rooms_createAndList() {
   const marker = 'TEST-ROOM-' + new Date().getTime();
   let createdRoomId = null;
   try {
-    const room = createRoom_(adminSession, marker, 'Hostel A', '2', 3);
+    const room = createRoom_(adminSession, marker, 'Hostel A', '2', 3, ROOM_TYPES.TEAM);
     createdRoomId = room.roomId;
     assertEqual_(room.status, 'AVAILABLE', 'new room should start AVAILABLE');
+    assertEqual_(room.roomType, ROOM_TYPES.TEAM, 'room should report the roomType it was created with');
 
     let threwForbidden = false;
     try {
-      createRoom_(regSession, marker + '-2', 'Hostel A', '2', 2);
+      createRoom_(regSession, marker + '-2', 'Hostel A', '2', 2, ROOM_TYPES.TEAM);
     } catch (err) {
       threwForbidden = true;
       assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-admin room creation');
@@ -545,18 +546,28 @@ function test_rooms_createAndList() {
 
     let threwDuplicate = false;
     try {
-      createRoom_(adminSession, marker, 'Hostel B', '1', 2);
+      createRoom_(adminSession, marker, 'Hostel B', '1', 2, ROOM_TYPES.TEAM);
     } catch (err) {
       threwDuplicate = true;
       assertEqual_(err.code, 'DUPLICATE', 'wrong error code for duplicate room number');
     }
     assertTrue_(threwDuplicate, 'createRoom_ did not reject a duplicate room number');
 
+    let threwBadType = false;
+    try {
+      createRoom_(adminSession, marker + '-3', 'Hostel B', '1', 2, 'HOTEL');
+    } catch (err) {
+      threwBadType = true;
+      assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong error code for an invalid roomType');
+    }
+    assertTrue_(threwBadType, 'createRoom_ did not reject an invalid roomType');
+
     const rooms = listRooms_(regSession);
     const listed = rooms.filter(function (r) { return r.roomId === createdRoomId; })[0];
     assertTrue_(!!listed, 'listRooms_ did not include the newly created room');
     assertEqual_(listed.capacity, 3, 'listed room capacity mismatch');
     assertEqual_(listed.remaining, 3, 'a fresh room with no allocations should show full remaining capacity');
+    assertEqual_(listed.roomType, ROOM_TYPES.TEAM, 'listed room should report its roomType');
   } finally {
     if (createdRoomId) deleteRowById_('ROOMS', 'RoomId', createdRoomId);
   }
@@ -577,24 +588,33 @@ function test_accommodation_listPendingAndAllocateRoom() {
     ]);
     createdTeamId = team.teamId;
 
-    const room = createRoom_(adminSession, marker, 'Hostel A', '1', 1);
+    const room = createRoom_(adminSession, marker, 'Hostel A', '1', 1, ROOM_TYPES.INCHARGE);
     createdRoomId = room.roomId;
 
-    const pendingBefore = listPendingAccommodation_(accSession).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    const pendingBefore = listPendingAccommodation_(accSession, ROOM_TYPES.INCHARGE).filter(function (r) { return r.teamId === createdTeamId; })[0];
     assertTrue_(!!pendingBefore, 'newly registered team with flagged incharges should appear in the pending list');
     assertEqual_(pendingBefore.neededCount, 2, 'expected 2 incharges needing accommodation');
     assertEqual_(pendingBefore.remainingCount, 2, 'nothing allocated yet, remaining should equal needed');
 
     let threwForbidden = false;
     try {
-      allocateRoom_(regSession, createdTeamId, createdRoomId, 1);
+      allocateRoom_(regSession, createdTeamId, createdRoomId, 1, ROOM_TYPES.INCHARGE);
     } catch (err) {
       threwForbidden = true;
       assertEqual_(err.code, 'FORBIDDEN', 'wrong error code for non-Accommodation caller');
     }
     assertTrue_(threwForbidden, 'allocateRoom_ did not reject a non-Accommodation caller');
 
-    const allocation = allocateRoom_(accSession, createdTeamId, createdRoomId, 1);
+    let threwMismatch = false;
+    try {
+      allocateRoom_(accSession, createdTeamId, createdRoomId, 1, ROOM_TYPES.TEAM);
+    } catch (err) {
+      threwMismatch = true;
+      assertEqual_(err.code, 'ROOM_TYPE_MISMATCH', 'wrong error code for allocating a TEAM kind into an INCHARGE room');
+    }
+    assertTrue_(threwMismatch, 'allocateRoom_ did not reject a kind that does not match the room\'s roomType');
+
+    const allocation = allocateRoom_(accSession, createdTeamId, createdRoomId, 1, ROOM_TYPES.INCHARGE);
     createdAllocationId = allocation.allocationId;
 
     const roomsAfter = listRooms_(accSession).filter(function (r) { return r.roomId === createdRoomId; })[0];
@@ -603,14 +623,14 @@ function test_accommodation_listPendingAndAllocateRoom() {
 
     let threwFull = false;
     try {
-      allocateRoom_(accSession, createdTeamId, createdRoomId, 1);
+      allocateRoom_(accSession, createdTeamId, createdRoomId, 1, ROOM_TYPES.INCHARGE);
     } catch (err) {
       threwFull = true;
       assertEqual_(err.code, 'ROOM_FULL', 'wrong error code for an over-capacity allocation');
     }
     assertTrue_(threwFull, 'allocateRoom_ did not reject an allocation exceeding remaining room capacity');
 
-    const pendingAfter = listPendingAccommodation_(accSession).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    const pendingAfter = listPendingAccommodation_(accSession, ROOM_TYPES.INCHARGE).filter(function (r) { return r.teamId === createdTeamId; })[0];
     assertTrue_(!!pendingAfter, 'team should still be pending — 1 of 2 incharges allocated');
     assertEqual_(pendingAfter.remainingCount, 1, 'expected exactly 1 remaining incharge needing a room');
   } finally {
@@ -621,6 +641,103 @@ function test_accommodation_listPendingAndAllocateRoom() {
       deleteRowById_('TEAMS', 'TeamId', createdTeamId);
     }
   }
+}
+
+function test_accommodation_teamMemberAllocation() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  const marker = 'TEST-TEAMROOM-' + new Date().getTime();
+  let createdTeamId = null;
+  let createdRoomId = null;
+  let createdAllocationId = null;
+  try {
+    // 5 team members, no NeedsAccommodation flag involved — TEAM allocation is unconditional.
+    const team = registerTeam_(regSession, 'Team Room Test College', 'District', 5, [
+      { name: 'Coach One', isPrimary: true }
+    ]);
+    createdTeamId = team.teamId;
+
+    const room = createRoom_(adminSession, marker, 'Hostel C', '1', 3, ROOM_TYPES.TEAM);
+    createdRoomId = room.roomId;
+
+    const pendingBefore = listPendingAccommodation_(accSession, ROOM_TYPES.TEAM).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!pendingBefore, 'every registered team should appear in the TEAM pending list, no opt-in needed');
+    assertEqual_(pendingBefore.neededCount, 5, 'expected neededCount to equal the team\'s member count');
+
+    const allocation = allocateRoom_(accSession, createdTeamId, createdRoomId, 3, ROOM_TYPES.TEAM);
+    createdAllocationId = allocation.allocationId;
+
+    const roomsAfter = listRooms_(accSession).filter(function (r) { return r.roomId === createdRoomId; })[0];
+    assertEqual_(roomsAfter.remaining, 0, 'room capacity 3 should be fully consumed by 3 allocated members');
+
+    const pendingAfter = listPendingAccommodation_(accSession, ROOM_TYPES.TEAM).filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!pendingAfter, 'team should still be pending — 3 of 5 members allocated');
+    assertEqual_(pendingAfter.remainingCount, 2, 'expected exactly 2 remaining members needing a room');
+
+    let threwOver = false;
+    try {
+      allocateRoom_(accSession, createdTeamId, createdRoomId, 1, ROOM_TYPES.TEAM);
+    } catch (err) {
+      threwOver = true;
+      assertEqual_(err.code, 'ROOM_FULL', 'wrong error code — room itself is already full');
+    }
+    assertTrue_(threwOver, 'allocateRoom_ did not reject allocating into an already-full room');
+  } finally {
+    if (createdAllocationId) deleteRowById_('ACCOMMODATION', 'AllocationId', createdAllocationId);
+    if (createdRoomId) deleteRowById_('ROOMS', 'RoomId', createdRoomId);
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+// Structural checks only — this cannot verify a matrix actually decodes on a real scanner
+// (that requires a physical device test, tracked separately). Catches gross encoding bugs:
+// wrong dimensions, missing finder/format patterns, data not actually affecting output.
+function test_qrEncoder_structuralValidity() {
+  const qr = qrEncode_('TEST-TOKEN-abc123');
+  assertEqual_(qr.size, 17 + 4 * qr.version, 'QR module count does not match its own reported version');
+  assertEqual_(qr.matrix.length, qr.size, 'matrix row count does not match reported size');
+  assertEqual_(qr.matrix[0].length, qr.size, 'matrix column count does not match reported size');
+
+  // Top-left finder pattern: outer ring dark, inner ring light, center 3x3 dark.
+  assertTrue_(qr.matrix[0][0] === true, 'top-left finder pattern corner should be dark');
+  assertTrue_(qr.matrix[1][1] === false, 'finder pattern inner ring should be light');
+  assertTrue_(qr.matrix[3][3] === true, 'finder pattern center should be dark');
+
+  // Top-right and bottom-left finder patterns present.
+  assertTrue_(qr.matrix[0][qr.size - 1] === true, 'top-right finder pattern corner should be dark');
+  assertTrue_(qr.matrix[qr.size - 1][0] === true, 'bottom-left finder pattern corner should be dark');
+
+  // The always-dark module adjacent to the bottom-left finder pattern.
+  assertTrue_(qr.matrix[qr.size - 8][8] === true, 'the standard always-dark module should be set');
+
+  // Timing pattern: alternating dark/light along row 6 between the finder patterns.
+  assertTrue_(qr.matrix[6][8] === true, 'timing pattern module at col 8 should be dark (even index)');
+  assertTrue_(qr.matrix[6][9] === false, 'timing pattern module at col 9 should be light (odd index)');
+
+  // Two different tokens must produce different matrices — proves the data payload actually
+  // reaches the output, not just a static structural skeleton.
+  const qrOther = qrEncode_('DIFFERENT-TOKEN-xyz789');
+  let anyDifferent = false;
+  for (let r = 0; r < Math.min(qr.size, qrOther.size) && !anyDifferent; r++) {
+    for (let c = 0; c < Math.min(qr.size, qrOther.size) && !anyDifferent; c++) {
+      if (qr.matrix[r][c] !== qrOther.matrix[r][c]) anyDifferent = true;
+    }
+  }
+  assertTrue_(anyDifferent, 'encoding two different tokens produced identical matrices — data is not reaching the output');
+
+  // Token too long for the supported version range is rejected, not silently truncated.
+  let threwTooLong = false;
+  try {
+    qrEncode_(new Array(200).join('X'));
+  } catch (err) {
+    threwTooLong = true;
+    assertEqual_(err.code, 'QR_TOKEN_TOO_LONG', 'wrong error code for an over-length token');
+  }
+  assertTrue_(threwTooLong, 'qrEncode_ did not reject a token too long for supported QR versions');
 }
 
 // Each task appends its own test_xxx function and registers it here.
@@ -646,7 +763,9 @@ const TEST_CASES = [
   { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },
   { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag },
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
-  { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom }
+  { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
+  { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
+  { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity }
 ];
 
 function runAllTests_() {

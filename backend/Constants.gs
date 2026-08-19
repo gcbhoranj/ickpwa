@@ -9,6 +9,11 @@ const ROLES = {
   ACCOMMODATION: 'ACCOMMODATION'
 };
 
+// Room Master entries and their accommodation allocations both come in these two flavors:
+// TEAM rooms (on-campus, for team members) and INCHARGE rooms (rest houses/hotels, for
+// contingent incharges). A room only ever accepts allocations of its own type.
+const ROOM_TYPES = { TEAM: 'TEAM', INCHARGE: 'INCHARGE' };
+
 // sheetName -> ordered header row. This IS the schema; SheetHelpers/Setup read from here.
 const SHEET_SCHEMAS = {
   SETTINGS: ['Key', 'Value', 'UpdatedBy', 'UpdatedAt'],
@@ -43,9 +48,9 @@ const SHEET_SCHEMAS = {
     'Timestamp', 'ClientRequestId'],
   MEAL_ORDER_STATUS: ['StatusId', 'Date', 'Meal', 'Status', 'SetBy', 'SetAt'],
   ROOMS: ['RoomId', 'RoomNumber', 'Building', 'Floor', 'Capacity', 'Status', 'CreatedBy',
-    'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
+    'CreatedAt', 'UpdatedBy', 'UpdatedAt', 'RoomType'],
   ACCOMMODATION: ['AllocationId', 'TeamId', 'RoomId', 'PersonsAllocated', 'AllocatedAt',
-    'VacatedAt', 'Status', 'CreatedBy', 'UpdatedBy', 'UpdatedAt'],
+    'VacatedAt', 'Status', 'CreatedBy', 'UpdatedBy', 'UpdatedAt', 'SubjectType'],
   ACCOMMODATION_NOC: ['NocId', 'TeamId', 'Status', 'IssuedBy', 'IssuedAt', 'Notes'],
   REFUNDS: ['RefundId', 'TeamId', 'EntitlementId', 'Meal', 'Date', 'EligiblePersons',
     'ServedPersons', 'MealOrderStatusAtCalc', 'RefundablePersons', 'RefundAmount',

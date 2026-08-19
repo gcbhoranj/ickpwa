@@ -123,7 +123,7 @@ const ACTIONS = {
   },
   'admin.rooms.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return createRoom_(session, payload.roomNumber, payload.building, payload.floor, payload.capacity);
+    return createRoom_(session, payload.roomNumber, payload.building, payload.floor, payload.capacity, payload.roomType);
   },
   'rooms.list': function (payload, sessionId) {
     const session = requireSession_(sessionId);
@@ -131,11 +131,11 @@ const ACTIONS = {
   },
   'accommodation.listPending': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return { teams: listPendingAccommodation_(session) };
+    return { teams: listPendingAccommodation_(session, payload.kind) };
   },
   'accommodation.allocateRoom': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return allocateRoom_(session, payload.teamId, payload.roomId, payload.personsAllocated);
+    return allocateRoom_(session, payload.teamId, payload.roomId, payload.personsAllocated, payload.kind);
   }
 };
 

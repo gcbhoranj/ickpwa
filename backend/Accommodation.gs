@@ -1,25 +1,43 @@
-// Accommodation.gs — incharge accommodation needs (flagged at registration, Task 2) and
-// room allocation. Deliberately narrow: allocate only — no reallocate/vacate/NOC here, those
-// depend on the departure workflow (not built yet) and stay in the real future Phase 6.
+// Accommodation.gs — room allocation for two kinds of pending need, both keyed by
+// ROOM_TYPES ('TEAM' | 'INCHARGE') and always allocated into a room of the matching type
+// (Rooms.gs's createRoom_/listRooms_):
+//   - TEAM: every registered team's own members (TEAMS.NumberOfTeamMembers) — always
+//     pending, no opt-in flag, on-campus rooms.
+//   - INCHARGE: contingent incharges flagged at registration (CONTINGENT_INCHARGES.
+//     NeedsAccommodation, Task 2), rest houses/hotels entered via Room Master by Admin.
+// Deliberately narrow: allocate only — no reallocate/vacate/NOC here, those depend on the
+// departure workflow (not built yet) and stay in the real future Phase 6.
 
-function listPendingAccommodation_(actorSession) {
+function _accommodationNeededCount_(kind, teamId, team) {
+  if (kind === ROOM_TYPES.TEAM) {
+    return team ? Number(team.NumberOfTeamMembers) : 0;
+  }
+  return findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId)
+    .filter(function (i) { return i.NeedsAccommodation === 'true' && i.Active === 'true'; }).length;
+}
+
+function listPendingAccommodation_(actorSession, kind) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.ACCOMMODATION]);
-  const allIncharges = rowsToObjects_('CONTINGENT_INCHARGES').filter(function (i) { return i.NeedsAccommodation === 'true' && i.Active === 'true'; });
-  const allocations = rowsToObjects_('ACCOMMODATION').filter(function (a) { return a.Status === 'ALLOCATED'; });
+  if (kind !== ROOM_TYPES.TEAM && kind !== ROOM_TYPES.INCHARGE) {
+    throw apiError_('VALIDATION_ERROR', 'kind must be TEAM or INCHARGE.');
+  }
   const teams = rowsToObjects_('TEAMS');
-
-  const neededByTeam = {};
-  allIncharges.forEach(function (i) {
-    neededByTeam[i.TeamId] = (neededByTeam[i.TeamId] || 0) + 1;
-  });
+  const allocations = rowsToObjects_('ACCOMMODATION')
+    .filter(function (a) { return a.Status === 'ALLOCATED' && a.SubjectType === kind; });
   const allocatedByTeam = {};
   allocations.forEach(function (a) {
     allocatedByTeam[a.TeamId] = (allocatedByTeam[a.TeamId] || 0) + Number(a.PersonsAllocated);
   });
 
-  return Object.keys(neededByTeam).map(function (teamId) {
+  const candidateTeamIds = kind === ROOM_TYPES.TEAM
+    ? teams.map(function (t) { return t.TeamId; })
+    : Object.keys(rowsToObjects_('CONTINGENT_INCHARGES')
+        .filter(function (i) { return i.NeedsAccommodation === 'true' && i.Active === 'true'; })
+        .reduce(function (acc, i) { acc[i.TeamId] = true; return acc; }, {}));
+
+  return candidateTeamIds.map(function (teamId) {
     const team = teams.filter(function (t) { return t.TeamId === teamId; })[0];
-    const needed = neededByTeam[teamId];
+    const needed = _accommodationNeededCount_(kind, teamId, team);
     const allocated = allocatedByTeam[teamId] || 0;
     return {
       teamId: teamId, registrationNumber: team ? team.RegistrationNumber : '', collegeName: team ? team.CollegeName : '',
@@ -28,13 +46,19 @@ function listPendingAccommodation_(actorSession) {
   }).filter(function (row) { return row.remainingCount > 0; });
 }
 
-function allocateRoom_(actorSession, teamId, roomId, personsAllocated) {
+function allocateRoom_(actorSession, teamId, roomId, personsAllocated, kind) {
   requireRole_(actorSession, [ROLES.ACCOMMODATION]);
+  if (kind !== ROOM_TYPES.TEAM && kind !== ROOM_TYPES.INCHARGE) {
+    throw apiError_('VALIDATION_ERROR', 'kind must be TEAM or INCHARGE.');
+  }
   const persons = parseInt(personsAllocated, 10);
   if (!persons || persons < 1) throw apiError_('VALIDATION_ERROR', 'Persons allocated must be at least 1.');
 
   const room = findRowById_('ROOMS', 'RoomId', roomId);
   if (!room) throw apiError_('NOT_FOUND', 'No such room: ' + roomId);
+  if ((room.values.RoomType || ROOM_TYPES.TEAM) !== kind) {
+    throw apiError_('ROOM_TYPE_MISMATCH', 'This room is a ' + room.values.RoomType + ' room, not ' + kind + '.');
+  }
   const roomAllocations = findRowsByField_('ACCOMMODATION', 'RoomId', roomId).filter(function (a) { return a.Status === 'ALLOCATED'; });
   const roomAllocated = roomAllocations.reduce(function (sum, a) { return sum + Number(a.PersonsAllocated); }, 0);
   const roomRemaining = Number(room.values.Capacity) - roomAllocated;
@@ -42,23 +66,24 @@ function allocateRoom_(actorSession, teamId, roomId, personsAllocated) {
     throw apiError_('ROOM_FULL', 'Room only has ' + roomRemaining + ' space(s) remaining.');
   }
 
-  const neededIncharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId)
-    .filter(function (i) { return i.NeedsAccommodation === 'true' && i.Active === 'true'; });
-  const teamAllocations = findRowsByField_('ACCOMMODATION', 'TeamId', teamId).filter(function (a) { return a.Status === 'ALLOCATED'; });
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  const needed = _accommodationNeededCount_(kind, teamId, team ? team.values : null);
+  const teamAllocations = findRowsByField_('ACCOMMODATION', 'TeamId', teamId)
+    .filter(function (a) { return a.Status === 'ALLOCATED' && a.SubjectType === kind; });
   const teamAllocated = teamAllocations.reduce(function (sum, a) { return sum + Number(a.PersonsAllocated); }, 0);
-  const teamRemaining = neededIncharges.length - teamAllocated;
+  const teamRemaining = needed - teamAllocated;
   if (teamRemaining <= 0) {
-    throw apiError_('NOTHING_PENDING', 'This team has no remaining incharges needing accommodation.');
+    throw apiError_('NOTHING_PENDING', 'This team has no remaining ' + kind.toLowerCase() + ' persons needing accommodation.');
   }
   if (persons > teamRemaining) {
-    throw apiError_('OVER_ALLOCATION', 'This team only has ' + teamRemaining + ' incharge(s) still needing a room.');
+    throw apiError_('OVER_ALLOCATION', 'This team only has ' + teamRemaining + ' ' + kind.toLowerCase() + ' person(s) still needing a room.');
   }
 
   const allocationId = nextId_('ALLOC', 4);
   const now = new Date().toISOString();
   appendRow_('ACCOMMODATION', {
     AllocationId: allocationId, TeamId: teamId, RoomId: roomId, PersonsAllocated: persons,
-    AllocatedAt: now, VacatedAt: '', Status: 'ALLOCATED',
+    AllocatedAt: now, VacatedAt: '', Status: 'ALLOCATED', SubjectType: kind,
     CreatedBy: actorSession.userId, UpdatedBy: actorSession.userId, UpdatedAt: now
   });
 
@@ -71,5 +96,5 @@ function allocateRoom_(actorSession, teamId, roomId, personsAllocated) {
     Action: 'ALLOCATE_ROOM', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: roomId
   });
 
-  return { allocationId: allocationId, teamId: teamId, roomId: roomId, personsAllocated: persons };
+  return { allocationId: allocationId, teamId: teamId, roomId: roomId, personsAllocated: persons, kind: kind };
 }

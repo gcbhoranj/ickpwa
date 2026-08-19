@@ -1,40 +1,59 @@
 // accommodation.js — Accommodation Dashboard: the ACCOMMODATION role's first real screen.
-// Pending incharge-accommodation list + a single allocate action. No reallocate/vacate/NOC
-// here — those depend on the departure workflow and stay in the real future Phase 6.
+// Two independent pending lists, each allocated only into rooms of the matching type
+// (Rooms.gs ROOM_TYPES): TEAM (team members, on-campus rooms — every registered team,
+// unconditional) and INCHARGE (contingent incharges flagged at registration, rest
+// houses/hotels). No reallocate/vacate/NOC here — those depend on the departure workflow
+// and stay in the real future Phase 6.
+
+function _pendingSection(kind, title, pending, noneText) {
+  if (pending.length === 0) return '<h2>' + title + '</h2><p>' + noneText + '</p>';
+  return '<h2>' + title + '</h2>' +
+    '<table><thead><tr><th>Reg. No.</th><th>College</th><th>Remaining</th><th></th></tr></thead><tbody>' +
+      pending.map(function (t) {
+        return '<tr><td>' + t.registrationNumber + '</td><td>' + t.collegeName + '</td><td>' + t.remainingCount + '</td>' +
+          '<td><button class="allocate-btn" data-kind="' + kind + '" data-teamid="' + t.teamId + '" data-remaining="' + t.remainingCount + '">Allocate</button></td></tr>';
+      }).join('') +
+    '</tbody></table>';
+}
+
+function _roomsSection(title, rooms) {
+  if (rooms.length === 0) return '<h2>' + title + '</h2><p>None yet.</p>';
+  return '<h2>' + title + '</h2>' +
+    '<table><thead><tr><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
+      rooms.map(function (r) {
+        return '<tr><td>' + r.roomNumber + '</td><td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
+      }).join('') +
+    '</tbody></table>';
+}
 
 async function renderAccommodationDashboard(root, user) {
   root.innerHTML = '<div class="wizard-card"><h1>Welcome, ' + user.name + '</h1><p class="subtitle">Accommodation Committee</p><p>Loading…</p></div>';
   await refresh();
 
   async function refresh() {
-    const pending = await apiCall('accommodation.listPending', {});
-    const rooms = await apiCall('rooms.list', {});
+    const pendingTeams = await apiCall('accommodation.listPending', { kind: 'TEAM' });
+    const pendingIncharges = await apiCall('accommodation.listPending', { kind: 'INCHARGE' });
+    const roomsData = await apiCall('rooms.list', {});
+    const teamRooms = roomsData.rooms.filter(function (r) { return r.roomType === 'TEAM'; });
+    const inchargeRooms = roomsData.rooms.filter(function (r) { return r.roomType === 'INCHARGE'; });
+
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Welcome, ' + user.name + '</h1>' +
         '<p class="subtitle">Accommodation Committee</p>' +
         '<div id="accom-error" class="error" style="display:none"></div>' +
-        '<h2>Teams Needing Accommodation</h2>' +
-        (pending.teams.length === 0
-          ? '<p>No teams currently have incharges waiting for a room.</p>'
-          : '<table><thead><tr><th>Reg. No.</th><th>College</th><th>Remaining</th><th></th></tr></thead><tbody>' +
-              pending.teams.map(function (t) {
-                return '<tr><td>' + t.registrationNumber + '</td><td>' + t.collegeName + '</td><td>' + t.remainingCount + '</td>' +
-                  '<td><button class="allocate-btn" data-teamid="' + t.teamId + '" data-remaining="' + t.remainingCount + '">Allocate</button></td></tr>';
-              }).join('') +
-            '</tbody></table>') +
-        '<h2>Rooms</h2>' +
-        '<table><thead><tr><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
-          rooms.rooms.map(function (r) {
-            return '<tr><td>' + r.roomNumber + '</td><td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
-          }).join('') +
-        '</tbody></table>' +
+        _pendingSection('TEAM', 'Teams Needing Accommodation', pendingTeams.teams, 'No teams currently have members waiting for a room.') +
+        _pendingSection('INCHARGE', 'Incharges Needing Accommodation', pendingIncharges.teams, 'No teams currently have incharges waiting for a room.') +
+        _roomsSection('Team Rooms (on-campus)', teamRooms) +
+        _roomsSection('Incharge Rooms (rest houses / hotels)', inchargeRooms) +
         '<button id="logout-btn" style="margin-top:16px">Log Out</button>' +
       '</div>';
 
     Array.prototype.forEach.call(document.querySelectorAll('.allocate-btn'), function (btn) {
       btn.addEventListener('click', function () {
-        renderAllocateForm(btn.getAttribute('data-teamid'), Number(btn.getAttribute('data-remaining')), rooms.rooms);
+        const kind = btn.getAttribute('data-kind');
+        const roomList = kind === 'TEAM' ? teamRooms : inchargeRooms;
+        renderAllocateForm(kind, btn.getAttribute('data-teamid'), Number(btn.getAttribute('data-remaining')), roomList);
       });
     });
 
@@ -44,12 +63,13 @@ async function renderAccommodationDashboard(root, user) {
     });
   }
 
-  function renderAllocateForm(teamId, remaining, roomList) {
+  function renderAllocateForm(kind, teamId, remaining, roomList) {
     const availableRooms = roomList.filter(function (r) { return r.remaining > 0; });
+    const subjectLabel = kind === 'TEAM' ? 'team member(s)' : 'incharge(s)';
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Allocate Room</h1>' +
-        '<p class="subtitle">' + remaining + ' incharge(s) still need a room</p>' +
+        '<p class="subtitle">' + remaining + ' ' + subjectLabel + ' still need a room</p>' +
         '<div id="allocate-error" class="error" style="display:none"></div>' +
         '<form id="allocate-form">' +
           '<label>Room<select id="allocate-room">' +
@@ -71,6 +91,7 @@ async function renderAccommodationDashboard(root, user) {
       errEl.style.display = 'none';
       try {
         await apiCall('accommodation.allocateRoom', {
+          kind: kind,
           teamId: teamId,
           roomId: document.getElementById('allocate-room').value,
           personsAllocated: Number(document.getElementById('allocate-persons').value)
