@@ -38,6 +38,11 @@ const SHEET_SCHEMAS = {
     'Status', 'QrToken', 'DigitalCouponPdfFileId', 'PrintedCouponPdfFileId', 'EmailStatus',
     'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
   FOOD_COUPONS: ['CouponId', 'PackageId', 'TeamId', 'QrToken', 'Status', 'IssuedAt'],
+  // One row per incharge on the team, written at purchase time regardless of whether they
+  // opted into any meal (a complete audit trail of who was asked and what they chose, not
+  // just who's included) — never edited afterward, matching every other transactional sheet.
+  PACKAGE_INCHARGE_MEALS: ['PackageInchargeMealId', 'PackageId', 'InchargeId', 'InchargeName',
+    'IncludeBreakfast', 'IncludeLunch', 'IncludeDinner', 'CreatedBy', 'CreatedAt'],
   PRINTED_COUPONS: ['PrintedCouponId', 'CouponId', 'PackageId', 'SequenceNumber', 'TotalCount',
     'PrintBatchId', 'GeneratedAt', 'GeneratedBy'],
   MEAL_ENTITLEMENTS: ['EntitlementId', 'PackageId', 'TeamId', 'Date', 'Meal', 'Rate',
@@ -76,7 +81,7 @@ const SHEET_SCHEMAS = {
 // sheetName -> ID prefix. SETTINGS (keyed) and SESSIONS (opaque random) intentionally excluded.
 const ID_PREFIXES = {
   TEAMS: 'TEAM', CONTINGENT_INCHARGES: 'INC', PAYMENTS: 'PAY', CHARGES: 'CHG',
-  FOOD_PACKAGES: 'PKG', FOOD_COUPONS: 'CPN', PRINTED_COUPONS: 'PRC',
+  FOOD_PACKAGES: 'PKG', FOOD_COUPONS: 'CPN', PRINTED_COUPONS: 'PRC', PACKAGE_INCHARGE_MEALS: 'PIM',
   MEAL_ENTITLEMENTS: 'ENT', MEAL_USAGE: 'USG', MEAL_ORDER_STATUS: 'STA', ROOMS: 'ROOM',
   ACCOMMODATION: 'ALLOC', ACCOMMODATION_NOC: 'NOC', REFUNDS: 'REF',
   SECURITY_REFUNDS: 'SREF', SETTLEMENTS: 'SETL', RECEIPTS: 'RCT', RELIEVING: 'REL',

@@ -66,16 +66,20 @@ const ACTIONS = {
     return runAllTests_();
   },
   // Since Phase 4, the full test suite no longer reliably completes inside one Apps Script
-  // execution (see dev-log). payload.only: 'slow' runs just the tests known to take real
-  // time — PDF/Slides document generation, or several sequential Sheets API round trips per
-  // test (flagged 'slow: true' in TEST_CASES); omit it to run everything else. Same
-  // AllowSelfTest gate and non-production intent as system.selfTest.
+  // execution (see dev-log). Tests are grouped by TEST_CASES' `tier` property into three
+  // buckets, each sized to comfortably clear the 6-minute ceiling on its own: default/omitted
+  // ("fast") for ordinary tests, 'pdf' for real Slides/Drive document generation (~30-40s
+  // each), 'mess' for Sheets-only fixture-heavy tests (several sequential API round trips,
+  // no PDF). payload.only selects 'pdf' or 'mess'; omit it for the fast tier. Two tiers
+  // ('slow' covering both 'pdf' and Sheets-heavy work) turned out not to be enough — see
+  // dev-log for the two separate live ceiling-hits that drove first a two-way then this
+  // three-way split. Same AllowSelfTest gate and non-production intent as system.selfTest.
   'system.selfTestSplit': function (payload) {
     if (getSetting_('AllowSelfTest', 'false') !== 'true') {
       throw apiError_('FORBIDDEN', 'Self-test is disabled.');
     }
-    const wantSlow = payload && payload.only === 'slow';
-    const cases = TEST_CASES.filter(function (tc) { return !!tc.slow === wantSlow; });
+    const wantTier = (payload && payload.only) || 'fast';
+    const cases = TEST_CASES.filter(function (tc) { return (tc.tier || 'fast') === wantTier; });
     const results = cases.map(function (testCase) {
       try {
         testCase.fn();
@@ -193,7 +197,7 @@ const ACTIONS = {
   },
   'registration.package.purchase': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return purchasePackage_(session, payload.teamId, payload.includeIncharges, payload.dinnerDate, payload.mode, payload.recipientEmails);
+    return purchasePackage_(session, payload.teamId, payload.inchargeMealSelections, payload.dinnerDate, payload.mode, payload.recipientEmails);
   },
   'registration.package.list': function (payload, sessionId) {
     const session = requireSession_(sessionId);

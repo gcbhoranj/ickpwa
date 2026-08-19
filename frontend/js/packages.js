@@ -1,8 +1,14 @@
 // packages.js — Food Packages screen (Registration Dashboard → Team Detail → Food Packages):
 // purchase (mandatory Package 1, rolling Package 2/3+), list, resend, reprint. Backend:
 // registration.package.purchase/list/resend/reprint (Phase 4).
+//
+// Incharge meal selection is per individual, per meal (decided with the human 2026-08-19) —
+// most teams stay at a hotel for breakfast/dinner and only join mess for lunch, so a single
+// "include incharges" checkbox applying uniformly to all three meals was wrong. `incharges`
+// comes from Team Detail's already-fetched CONTINGENT_INCHARGES rows (both Registration and
+// Mess get this — no extra API call needed here).
 
-async function renderPackagesScreen(root, user, teamId, registrationNumber) {
+async function renderPackagesScreen(root, user, teamId, registrationNumber, incharges) {
   root.innerHTML = '<div class="wizard-card"><h1>Food Packages</h1><p>Loading…</p></div>';
   let soldConfirmation = null; // survives refresh() re-renders; cleared on the next purchase or a manual dismiss
   await refresh();
@@ -33,7 +39,20 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber) {
             '</tbody></table>') +
         '<h2>Purchase Package</h2>' +
         '<form id="purchase-form">' +
-          '<label><input type="checkbox" id="purchase-include-incharges"> Include incharges in this package</label>' +
+          ((incharges && incharges.length > 0)
+            ? '<h3 style="margin:16px 0 4px">Incharge meal selection</h3>' +
+              '<p class="subtitle" style="margin:0 0 8px">Team members are always included in every meal. Tick only the meals each incharge will actually eat at mess — e.g. leave Breakfast/Dinner blank if they\'re staying at a hotel.</p>' +
+              '<table><thead><tr><th>Incharge</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead><tbody>' +
+                incharges.map(function (inc) {
+                  return '<tr data-inchargeid="' + inc.InchargeId + '">' +
+                    '<td>' + inc.Name + (inc.Designation ? ' (' + inc.Designation + ')' : '') + '</td>' +
+                    '<td><input type="checkbox" class="incharge-meal" data-meal="breakfast"></td>' +
+                    '<td><input type="checkbox" class="incharge-meal" data-meal="lunch"></td>' +
+                    '<td><input type="checkbox" class="incharge-meal" data-meal="dinner"></td>' +
+                  '</tr>';
+                }).join('') +
+              '</tbody></table>'
+            : '') +
           '<label>Dinner Date (leave blank to auto-continue)<input type="date" id="purchase-dinner-date"></label>' +
           '<label>Payment Mode<select id="purchase-mode">' +
             '<option value="Cash">Cash</option>' +
@@ -78,9 +97,19 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber) {
       const errEl = document.getElementById('packages-error');
       errEl.style.display = 'none';
       try {
+        const inchargeMealSelections = Array.prototype.map.call(
+          document.querySelectorAll('#purchase-form tr[data-inchargeid]'),
+          function (row) {
+            const meal = function (name) { return row.querySelector('.incharge-meal[data-meal="' + name + '"]').checked; };
+            return {
+              inchargeId: row.getAttribute('data-inchargeid'),
+              breakfast: meal('breakfast'), lunch: meal('lunch'), dinner: meal('dinner')
+            };
+          }
+        );
         const result = await apiCall('registration.package.purchase', {
           teamId: teamId,
-          includeIncharges: document.getElementById('purchase-include-incharges').checked,
+          inchargeMealSelections: inchargeMealSelections,
           dinnerDate: document.getElementById('purchase-dinner-date').value || null,
           mode: document.getElementById('purchase-mode').value
         });

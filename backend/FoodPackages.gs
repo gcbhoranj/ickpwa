@@ -5,9 +5,14 @@
 //
 // Each package is a fixed 3-meal window — Dinner, then next-day Breakfast, next-day Lunch
 // (never a variable set) — "one new coupon+QR per package, never extending an old one".
-// EligiblePersons is a per-package snapshot (team members, plus incharges if the operator
-// includes them for that specific package) — any valid copy of the package's single QR
-// covers any group size up to the remaining balance (group mess entry, built in Phase 5).
+// Team members are unconditionally eligible for every meal; incharges are opted in per
+// individual, per meal (most teams stay at a hotel for breakfast/dinner and only join mess
+// for lunch — decided with the human 2026-08-19), so `MEAL_ENTITLEMENTS.EligiblePersons` can
+// genuinely differ across a package's three meals. `FOOD_PACKAGES.EligiblePersons` stays a
+// single package-level number — the physical coupon pool size (team members + incharges
+// included in at least one meal, counted once each) — since coupons aren't meal-specific;
+// any valid copy of the package's single QR covers any group size up to whichever meal's
+// remaining balance is being scanned right now (group mess entry, built in Phase 5).
 
 // Fields shown on the digital/printed coupon documents (CouponDocuments.gs), matching the
 // reference design: team name, the PRIMARY contingent incharge's name/designation/contact
@@ -52,14 +57,45 @@ function _addDays_(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
-function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, dinnerDate, mode, recipientEmails) {
+// Team members are unconditionally in every meal (unchanged from before). Incharges are
+// per-meal, per-individual (each incharge picks their own Breakfast/Lunch/Dinner — most
+// teams stay at a hotel for breakfast/dinner and only join the mess for lunch, so a single
+// "include incharges" flag applying to all three meals uniformly was wrong). Physical coupon
+// pool counts an incharge once if they opted into ANY meal, not once per meal — coupons
+// aren't meal-specific (spec §14/§20: "operational labels, not separate balances").
+function _resolveInchargeMealSelections_(incharges, inchargeMealSelections) {
+  const byInchargeId = {};
+  (inchargeMealSelections || []).forEach(function (s) { byInchargeId[s.inchargeId] = s; });
+  return incharges.map(function (inc) {
+    const sel = byInchargeId[inc.InchargeId] || {};
+    return {
+      inchargeId: inc.InchargeId, inchargeName: inc.Name,
+      breakfast: !!sel.breakfast, lunch: !!sel.lunch, dinner: !!sel.dinner
+    };
+  });
+}
+
+function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDate, mode, recipientEmails) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
   if (!mode) throw apiError_('VALIDATION_ERROR', 'Payment mode is required.');
 
-  const includeIncharges = !!includeInchargesInEntitlement;
-  const eligiblePersons = Number(team.values.NumberOfTeamMembers) + (includeIncharges ? Number(team.values.NumberOfContingentIncharges) : 0);
+  const teamMembers = Number(team.values.NumberOfTeamMembers);
+  const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId);
+  const resolvedSelections = _resolveInchargeMealSelections_(incharges, inchargeMealSelections);
+
+  const dinnerIncharges = resolvedSelections.filter(function (s) { return s.dinner; });
+  const breakfastIncharges = resolvedSelections.filter(function (s) { return s.breakfast; });
+  const lunchIncharges = resolvedSelections.filter(function (s) { return s.lunch; });
+  const dinnerEligible = teamMembers + dinnerIncharges.length;
+  const breakfastEligible = teamMembers + breakfastIncharges.length;
+  const lunchEligible = teamMembers + lunchIncharges.length;
+
+  // Physical coupon pool + FOOD_PACKAGES.EligiblePersons: team members + incharges included
+  // in at least one meal (counted once each, regardless of how many meals they checked).
+  const includedIncharges = resolvedSelections.filter(function (s) { return s.breakfast || s.lunch || s.dinner; });
+  const eligiblePersons = teamMembers + includedIncharges.length;
   if (eligiblePersons < 1) throw apiError_('VALIDATION_ERROR', 'Eligible persons must be at least 1.');
 
   const existingPackages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
@@ -70,7 +106,7 @@ function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, d
   const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
   const rateLunch = Number(getSetting_('RateLunch', '0'));
   const rateDinner = Number(getSetting_('RateDinner', '0'));
-  const amount = (rateBreakfast + rateLunch + rateDinner) * eligiblePersons;
+  const amount = rateDinner * dinnerEligible + rateBreakfast * breakfastEligible + rateLunch * lunchEligible;
 
   const packageId = nextId_('PKG', 4);
   const couponId = nextId_('CPN', 4);
@@ -85,7 +121,7 @@ function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, d
 
   appendRow_('FOOD_PACKAGES', {
     PackageId: packageId, TeamId: teamId, PackageNumber: packageNumber, CouponId: couponId,
-    IncludeInchargesInEntitlement: includeIncharges ? 'true' : 'false', EligiblePersons: eligiblePersons,
+    IncludeInchargesInEntitlement: includedIncharges.length > 0 ? 'true' : 'false', EligiblePersons: eligiblePersons,
     PurchaseDateTime: now, Amount: amount, RateBreakfastSnapshot: rateBreakfast, RateLunchSnapshot: rateLunch,
     RateDinnerSnapshot: rateDinner, StartMeal: startDate, EndMeal: endDate, Status: 'ACTIVE', QrToken: qrToken,
     DigitalCouponPdfFileId: '', PrintedCouponPdfFileId: '', EmailStatus: 'NOT_SENT',
@@ -96,16 +132,29 @@ function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, d
     CouponId: couponId, PackageId: packageId, TeamId: teamId, QrToken: qrToken, Status: 'ACTIVE', IssuedAt: now
   });
 
+  // One row per incharge on the team (not just the included ones) — a complete record of
+  // who was asked and what they chose, per package.
+  if (incharges.length > 0) {
+    const pimIds = nextIdBatch_('PIM', resolvedSelections.length, 4);
+    appendRows_('PACKAGE_INCHARGE_MEALS', resolvedSelections.map(function (s, i) {
+      return {
+        PackageInchargeMealId: pimIds[i], PackageId: packageId, InchargeId: s.inchargeId, InchargeName: s.inchargeName,
+        IncludeBreakfast: s.breakfast ? 'true' : 'false', IncludeLunch: s.lunch ? 'true' : 'false',
+        IncludeDinner: s.dinner ? 'true' : 'false', CreatedBy: actorSession.userId, CreatedAt: now
+      };
+    }));
+  }
+
   const meals = [
-    { meal: 'DINNER', date: startDate, rate: rateDinner },
-    { meal: 'BREAKFAST', date: endDate, rate: rateBreakfast },
-    { meal: 'LUNCH', date: endDate, rate: rateLunch }
+    { meal: 'DINNER', date: startDate, rate: rateDinner, eligiblePersons: dinnerEligible },
+    { meal: 'BREAKFAST', date: endDate, rate: rateBreakfast, eligiblePersons: breakfastEligible },
+    { meal: 'LUNCH', date: endDate, rate: rateLunch, eligiblePersons: lunchEligible }
   ];
   const entitlementIds = nextIdBatch_('ENT', meals.length, 4);
   appendRows_('MEAL_ENTITLEMENTS', meals.map(function (m, i) {
     return {
       EntitlementId: entitlementIds[i], PackageId: packageId, TeamId: teamId, Date: m.date, Meal: m.meal,
-      Rate: m.rate, EligiblePersons: eligiblePersons, ServedPersons: 0, RemainingPersons: eligiblePersons,
+      Rate: m.rate, EligiblePersons: m.eligiblePersons, ServedPersons: 0, RemainingPersons: m.eligiblePersons,
       RefundablePersons: '', RefundableAmount: '', MealOrderStatus: 'NOT_ORDERED',
       ValidFrom: m.date, ValidUntil: m.date, Status: 'ACTIVE'
     };

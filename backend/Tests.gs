@@ -642,7 +642,7 @@ function test_foodPackages_messRoleParity() {
     const team = registerTeam_(regSession, 'Mess Sale Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
 
-    const pkg = purchasePackage_(messSession, createdTeamId, false, null, 'Cash', null);
+    const pkg = purchasePackage_(messSession, createdTeamId, [], null, 'Cash', null);
     createdPackageIds.push(pkg.packageId);
     trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
     assertTrue_(pkg.amount > 0, 'MESS-purchased package should report a real amount, not hidden/zeroed');
@@ -660,6 +660,7 @@ function test_foodPackages_messRoleParity() {
   } finally {
     trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
     createdPackageIds.forEach(function (packageId) {
+      findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PACKAGE_INCHARGE_MEALS', 'PackageInchargeMealId', r.PackageInchargeMealId); });
       findRowsByField_('PRINTED_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
       findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
       findRowsByField_('FOOD_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
@@ -910,7 +911,7 @@ function test_foodPackages_purchaseCreatesEverythingCorrectly() {
     const rateLunch = Number(getSetting_('RateLunch', '0'));
     const rateDinner = Number(getSetting_('RateDinner', '0'));
 
-    const pkg1 = purchasePackage_(regSession, createdTeamId, false, null, 'Cash', null);
+    const pkg1 = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null);
     createdPackageIds.push(pkg1.packageId);
     trashFileIds.push(pkg1.digitalCouponFileId, pkg1.printedCouponFileId);
 
@@ -940,16 +941,22 @@ function test_foodPackages_purchaseCreatesEverythingCorrectly() {
     assertEqual_(Number(payments[0].Amount), pkg1.amount, 'payment amount should match package amount');
 
     // Rolling: package 2 should continue right where package 1's Lunch left off, and
-    // including incharges this time changes eligiblePersons independently per package.
-    const pkg2 = purchasePackage_(regSession, createdTeamId, true, null, 'Cash', null);
+    // including incharges (both, every meal) this time changes eligiblePersons independently
+    // per package. Per-meal, per-individual selection itself is covered in detail by
+    // test_foodPackages_perInchargeMealSelections below.
+    const teamIncharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId);
+    const pkg2 = purchasePackage_(regSession, createdTeamId, teamIncharges.map(function (i) {
+      return { inchargeId: i.InchargeId, breakfast: true, lunch: true, dinner: true };
+    }), null, 'Cash', null);
     createdPackageIds.push(pkg2.packageId);
     trashFileIds.push(pkg2.digitalCouponFileId, pkg2.printedCouponFileId);
     assertEqual_(pkg2.packageNumber, 2, 'second package should be PackageNumber 2');
-    assertEqual_(pkg2.eligiblePersons, 4, 'eligiblePersons should include incharges when the operator opts in');
+    assertEqual_(pkg2.eligiblePersons, 4, 'eligiblePersons should include incharges when the operator opts them into every meal');
     assertEqual_(pkg2.startMeal, pkg1.endMeal, 'package 2 should start the day package 1 ended — rolling, no gap');
   } finally {
     trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
     createdPackageIds.forEach(function (packageId) {
+      findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PACKAGE_INCHARGE_MEALS', 'PackageInchargeMealId', r.PackageInchargeMealId); });
       findRowsByField_('PRINTED_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
       findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
       findRowsByField_('FOOD_COUPONS', 'PackageId', packageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
@@ -971,7 +978,7 @@ function test_foodPackages_resendAndReprint() {
   try {
     const team = registerTeam_(regSession, 'Resend Reprint Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
-    const pkg = purchasePackage_(regSession, createdTeamId, false, null, 'Cash', null);
+    const pkg = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null);
     createdPackageId = pkg.packageId;
     trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
 
@@ -992,6 +999,7 @@ function test_foodPackages_resendAndReprint() {
   } finally {
     trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
     if (createdPackageId) {
+      findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PACKAGE_INCHARGE_MEALS', 'PackageInchargeMealId', r.PackageInchargeMealId); });
       findRowsByField_('PRINTED_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
       findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
       findRowsByField_('FOOD_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
@@ -1266,6 +1274,76 @@ function test_mess_todaysSummary_aggregatesByTeam() {
   }
 }
 
+// Per-individual, per-meal incharge selection (decided with the human 2026-08-19): most
+// teams stay at a hotel for breakfast/dinner and only join mess for lunch, so a single
+// "include incharges" flag applying uniformly to all three meals was wrong. One incharge
+// opts into Lunch only; another opts into nothing at all (still gets a PACKAGE_INCHARGE_MEALS
+// audit row, just with everything false — proving "asked, declined" is recorded, not just
+// "not asked").
+function test_foodPackages_perInchargeMealSelections() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  let createdPackageId = null;
+  const trashFileIds = [];
+  try {
+    const team = registerTeam_(regSession, 'Per-Meal Incharge Test College', 'District', 2, [
+      { name: 'Lunch Only', isPrimary: true }, { name: 'Hotel Only' }
+    ]);
+    createdTeamId = team.teamId;
+    const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
+    const rateLunch = Number(getSetting_('RateLunch', '0'));
+    const rateDinner = Number(getSetting_('RateDinner', '0'));
+
+    const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId);
+    const lunchOnly = incharges.filter(function (i) { return i.Name === 'Lunch Only'; })[0];
+    const hotelOnly = incharges.filter(function (i) { return i.Name === 'Hotel Only'; })[0];
+
+    const pkg = purchasePackage_(regSession, createdTeamId, [
+      { inchargeId: lunchOnly.InchargeId, breakfast: false, lunch: true, dinner: false },
+      { inchargeId: hotelOnly.InchargeId, breakfast: false, lunch: false, dinner: false }
+    ], null, 'Cash', null);
+    createdPackageId = pkg.packageId;
+    trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
+
+    assertEqual_(pkg.eligiblePersons, 3, 'coupon pool should be 2 team members + 1 incharge included in at least one meal (Hotel Only excluded entirely)');
+    assertEqual_(pkg.amount, rateDinner * 2 + rateBreakfast * 2 + rateLunch * 3, 'amount should reflect each meal\'s own eligible count, not one uniform count');
+
+    const entitlements = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', pkg.packageId);
+    const byMeal = {};
+    entitlements.forEach(function (e) { byMeal[e.Meal] = e; });
+    assertEqual_(Number(byMeal.DINNER.EligiblePersons), 2, 'Dinner should be team members only — neither incharge opted in');
+    assertEqual_(Number(byMeal.BREAKFAST.EligiblePersons), 2, 'Breakfast should be team members only — neither incharge opted in');
+    assertEqual_(Number(byMeal.LUNCH.EligiblePersons), 3, 'Lunch should include the one incharge who opted in');
+
+    const printedCoupons = findRowsByField_('PRINTED_COUPONS', 'PackageId', pkg.packageId);
+    assertEqual_(printedCoupons.length, 3, 'printed coupon count should match the coupon pool (3), not a per-meal sum');
+
+    const pimRows = findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', pkg.packageId);
+    assertEqual_(pimRows.length, 2, 'expected one PACKAGE_INCHARGE_MEALS row per incharge on the team, including the fully-declined one');
+    const lunchOnlyRow = pimRows.filter(function (r) { return r.InchargeId === lunchOnly.InchargeId; })[0];
+    const hotelOnlyRow = pimRows.filter(function (r) { return r.InchargeId === hotelOnly.InchargeId; })[0];
+    assertEqual_(lunchOnlyRow.IncludeBreakfast, 'false', 'Lunch Only should not be marked for Breakfast');
+    assertEqual_(lunchOnlyRow.IncludeLunch, 'true', 'Lunch Only should be marked for Lunch');
+    assertEqual_(lunchOnlyRow.IncludeDinner, 'false', 'Lunch Only should not be marked for Dinner');
+    assertEqual_(hotelOnlyRow.IncludeBreakfast, 'false', 'Hotel Only should have a recorded row even though every meal is false');
+    assertEqual_(hotelOnlyRow.IncludeLunch, 'false', 'Hotel Only should have a recorded row even though every meal is false');
+    assertEqual_(hotelOnlyRow.IncludeDinner, 'false', 'Hotel Only should have a recorded row even though every meal is false');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdPackageId) {
+      findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PACKAGE_INCHARGE_MEALS', 'PackageInchargeMealId', r.PackageInchargeMealId); });
+      findRowsByField_('PRINTED_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
+      deleteRowById_('FOOD_PACKAGES', 'PackageId', createdPackageId);
+    }
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -1294,25 +1372,30 @@ const TEST_CASES = [
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
   { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
-  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, slow: true },
-  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, slow: true },
+  // 'pdf' tier: real Slides/Drive document generation (~30-40s each) — the original reason
+  // for a slow bucket at all (Phase 4).
+  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, tier: 'pdf' },
+  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, tier: 'pdf' },
   { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
-  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, slow: true },
+  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
-  // These all call _makeMessTestFixture_ (registerTeam_ + FOOD_PACKAGES + FOOD_COUPONS +
-  // MEAL_ENTITLEMENTS + full teardown, several sequential Sheets API round trips each) —
-  // with 7 of them the fast bucket started intermittently hitting Apps Script's 6-minute
-  // execution ceiling (observed live, not guessed, verifying this exact phase), the same
-  // problem Phase 4's two PDF-heavy tests caused originally. Flagged slow for the same
-  // reason: real per-test cost, not document generation specifically.
-  { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason, slow: true },
-  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup, slow: true },
-  { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario, slow: true },
-  { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement, slow: true },
-  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam, slow: true },
-  { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements, slow: true },
-  { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam, slow: true }
+  // 'mess' tier: _makeMessTestFixture_ (registerTeam_ + FOOD_PACKAGES + FOOD_COUPONS +
+  // MEAL_ENTITLEMENTS + full teardown, several sequential Sheets API round trips each, no
+  // PDF generation) — with 7 of these the fast bucket started intermittently hitting Apps
+  // Script's 6-minute execution ceiling (observed live, not guessed, verifying Phase 5); a
+  // separate tier from 'pdf' because Sheets-only work and real document generation have very
+  // different per-test costs and don't scale the same way — cramming both into one "slow"
+  // bucket hit the ceiling again once foodPackages_perInchargeMealSelections (also 'pdf')
+  // was added alongside them (observed live, not guessed, verifying this exact change).
+  { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason, tier: 'mess' },
+  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup, tier: 'mess' },
+  { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario, tier: 'mess' },
+  { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement, tier: 'mess' },
+  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam, tier: 'mess' },
+  { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements, tier: 'mess' },
+  { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam, tier: 'mess' },
+  { name: 'foodPackages_perInchargeMealSelections', fn: test_foodPackages_perInchargeMealSelections, tier: 'pdf' }
 ];
 
 function runAllTests_() {
