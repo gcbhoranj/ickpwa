@@ -183,6 +183,18 @@ const ACTIONS = {
   'registration.package.reprint': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return reprintCoupon_(session, payload.packageId);
+  },
+  'mess.currentMeal': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getMessCurrentMealView_(session);
+  },
+  'mess.resolveToken': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resolveMealToken_(session, payload.qrToken);
+  },
+  'mess.searchByCouponId': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resolveMealByCouponId_(session, payload.couponId);
   }
 };
 

@@ -1002,6 +1002,135 @@ function test_foodPackages_resendAndReprint() {
   }
 }
 
+function test_mess_timeWindowMath() {
+  assertEqual_(_timeToMinutes_('07:30'), 450, 'time-to-minutes conversion wrong');
+  assertEqual_(_timeToMinutes_('19:30'), 1170, 'time-to-minutes conversion wrong');
+  assertTrue_(_isWithinWindow_('08:00', '07:30', '09:30', 10), 'inside window should pass');
+  assertTrue_(_isWithinWindow_('07:20', '07:30', '09:30', 10), 'exactly at grace-before boundary should pass');
+  assertTrue_(!_isWithinWindow_('07:19', '07:30', '09:30', 10), 'one minute before grace-before boundary should fail');
+  assertTrue_(_isWithinWindow_('09:40', '07:30', '09:30', 10), 'exactly at grace-after boundary should pass');
+  assertTrue_(!_isWithinWindow_('09:41', '07:30', '09:30', 10), 'one minute after grace-after boundary should fail');
+  assertTrue_(!_isWithinWindow_('12:00', '07:30', '09:30', 10), 'well outside window should fail');
+}
+
+function test_mess_currentMeal_picksConfiguredWindow() {
+  const regSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  const before = getMealTimings_(regSession);
+  try {
+    updateMealTimings_(regSession, {
+      breakfastStart: '07:30', breakfastEnd: '09:30', lunchStart: '12:30', lunchEnd: '14:30',
+      dinnerStart: '19:30', dinnerEnd: '21:00', graceMinutes: '10'
+    });
+    // A fixed IST moment inside the Dinner window: 2026-08-19T20:00 IST = 2026-08-19T14:30:00Z.
+    const dinnerMoment = new Date('2026-08-19T14:30:00Z');
+    const duringDinner = _currentMeal_(dinnerMoment);
+    assertTrue_(!!duringDinner, '_currentMeal_ should find a match during the Dinner window');
+    assertEqual_(duringDinner.meal, 'DINNER', 'wrong meal selected for a Dinner-window moment');
+    assertEqual_(duringDinner.date, '2026-08-19', 'wrong date extracted for the IST moment');
+
+    // A moment between Lunch and Dinner, well outside any window+grace.
+    const betweenMeals = new Date('2026-08-19T10:00:00Z'); // 2026-08-19T15:30 IST
+    assertEqual_(_currentMeal_(betweenMeals), null, '_currentMeal_ should return null between meal windows');
+  } finally {
+    updateMealTimings_(regSession, before);
+  }
+}
+
+// Builds a team + one purchased-looking package/coupon/entitlement WITHOUT calling
+// purchasePackage_ (which generates real Slides/Drive PDFs and is slow) — every Mess test
+// below needs only the rows purchasePackage_ would have written, not the documents.
+function _makeMessTestFixture_(dinnerDate, breakfastLunchDate, eligiblePersons) {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const team = registerTeam_(regSession, 'Mess Fixture College', 'District', eligiblePersons, [{ name: 'Coach', isPrimary: true }]);
+  const packageId = nextId_('PKG', 4);
+  const couponId = nextId_('CPN', 4);
+  const qrToken = Utilities.getUuid().replace(/-/g, '').substring(0, 12);
+  const now = new Date().toISOString();
+  appendRow_('FOOD_PACKAGES', {
+    PackageId: packageId, TeamId: team.teamId, PackageNumber: 1, CouponId: couponId,
+    IncludeInchargesInEntitlement: 'false', EligiblePersons: eligiblePersons, PurchaseDateTime: now,
+    Amount: 0, RateBreakfastSnapshot: 0, RateLunchSnapshot: 0, RateDinnerSnapshot: 10,
+    StartMeal: dinnerDate, EndMeal: breakfastLunchDate, Status: 'ACTIVE', QrToken: qrToken,
+    DigitalCouponPdfFileId: '', PrintedCouponPdfFileId: '', EmailStatus: 'NOT_SENT',
+    CreatedBy: 'test-runner', CreatedAt: now, UpdatedBy: 'test-runner', UpdatedAt: now
+  });
+  appendRow_('FOOD_COUPONS', { CouponId: couponId, PackageId: packageId, TeamId: team.teamId, QrToken: qrToken, Status: 'ACTIVE', IssuedAt: now });
+  const entitlementIds = nextIdBatch_('ENT', 3, 4);
+  const meals = [
+    { meal: 'DINNER', date: dinnerDate, rate: 10 },
+    { meal: 'BREAKFAST', date: breakfastLunchDate, rate: 5 },
+    { meal: 'LUNCH', date: breakfastLunchDate, rate: 7 }
+  ];
+  appendRows_('MEAL_ENTITLEMENTS', meals.map(function (m, i) {
+    return {
+      EntitlementId: entitlementIds[i], PackageId: packageId, TeamId: team.teamId, Date: m.date, Meal: m.meal,
+      Rate: m.rate, EligiblePersons: eligiblePersons, ServedPersons: 0, RemainingPersons: eligiblePersons,
+      RefundablePersons: '', RefundableAmount: '', MealOrderStatus: 'NOT_ORDERED', ValidFrom: m.date, ValidUntil: m.date, Status: 'ACTIVE'
+    };
+  }));
+  return { teamId: team.teamId, packageId: packageId, couponId: couponId, qrToken: qrToken, entitlementIds: entitlementIds };
+}
+
+function _cleanupMessTestFixture_(fixture) {
+  fixture.entitlementIds.forEach(function (id) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', id); });
+  findRowsByField_('MEAL_USAGE', 'PackageId', fixture.packageId).forEach(function (r) { deleteRowById_('MEAL_USAGE', 'UsageId', r.UsageId); });
+  deleteRowById_('FOOD_COUPONS', 'CouponId', fixture.couponId);
+  deleteRowById_('FOOD_PACKAGES', 'PackageId', fixture.packageId);
+  findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', fixture.teamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+  deleteRowById_('TEAMS', 'TeamId', fixture.teamId);
+}
+
+function test_mess_resolveToken_successAndEachRejectionReason() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  const dinnerMoment = new Date('2026-08-19T14:30:00Z'); // 2026-08-19T20:00 IST — inside Dinner window
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 5);
+    const resolved = _resolveCoupon_(findRowsByField_('FOOD_COUPONS', 'QrToken', fixture.qrToken)[0], dinnerMoment);
+    assertEqual_(resolved.meal, 'DINNER', 'should resolve to Dinner for this fixture at this moment');
+    assertEqual_(resolved.eligiblePersons, 5, 'eligiblePersons should match the fixture');
+    assertEqual_(resolved.servedPersons, 0, 'servedPersons should start at 0');
+
+    let threwNotFound = false;
+    try { resolveMealToken_(messSession, 'not-a-real-token'); } catch (err) { threwNotFound = true; assertEqual_(err.code, 'NOT_FOUND', 'wrong code for unknown token'); }
+    assertTrue_(threwNotFound, 'resolveMealToken_ should reject an unknown token');
+
+    updateRowById_('FOOD_COUPONS', 'CouponId', fixture.couponId, { Status: 'CANCELLED' });
+    let threwInactiveCoupon = false;
+    try { _resolveCoupon_(findRowsByField_('FOOD_COUPONS', 'QrToken', fixture.qrToken)[0], dinnerMoment); } catch (err) { threwInactiveCoupon = true; assertEqual_(err.code, 'COUPON_INACTIVE', 'wrong code for inactive coupon'); }
+    assertTrue_(threwInactiveCoupon, 'should reject a CANCELLED coupon');
+    updateRowById_('FOOD_COUPONS', 'CouponId', fixture.couponId, { Status: 'ACTIVE' });
+
+    const betweenMeals = new Date('2026-08-19T10:00:00Z');
+    let threwNoWindow = false;
+    try { _resolveCoupon_(findRowsByField_('FOOD_COUPONS', 'QrToken', fixture.qrToken)[0], betweenMeals); } catch (err) { threwNoWindow = true; assertEqual_(err.code, 'NO_ACTIVE_MEAL_WINDOW', 'wrong code outside any window'); }
+    assertTrue_(threwNoWindow, 'should reject when no meal window is active');
+
+    // Inside a real window (Lunch), but one day past this fixture's coverage (Dinner
+    // 2026-08-19, Breakfast/Lunch 2026-08-20 only) — a window being active isn't enough,
+    // this specific coupon must have an entitlement for that exact date+meal.
+    const noCoverageMoment = new Date('2026-08-21T07:15:00Z'); // 2026-08-21T12:45 IST
+    let threwWrongMeal = false;
+    try { _resolveCoupon_(findRowsByField_('FOOD_COUPONS', 'QrToken', fixture.qrToken)[0], noCoverageMoment); } catch (err) { threwWrongMeal = true; assertEqual_(err.code, 'NOT_VALID_FOR_CURRENT_MEAL', 'wrong code for a date this coupon does not cover'); }
+    assertTrue_(threwWrongMeal, 'should reject a meal this coupon does not cover');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+function test_mess_resolveByCouponId_lostCouponLookup() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 3);
+    const resolved = resolveMealByCouponId_(messSession, fixture.couponId, new Date('2026-08-19T14:30:00Z'));
+    assertEqual_(resolved.qrToken, fixture.qrToken, 'coupon-ID lookup should surface the same qrToken the QR would have carried');
+    assertEqual_(resolved.eligiblePersons, 3, 'eligiblePersons should match the fixture');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -1033,7 +1162,11 @@ const TEST_CASES = [
   { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, slow: true },
   { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, slow: true },
   { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
-  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, slow: true }
+  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, slow: true },
+  { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
+  { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
+  { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason },
+  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup }
 ];
 
 function runAllTests_() {
