@@ -35,6 +35,25 @@ const ACTIONS = {
   'system.ping': function () {
     return { pong: true, serverTime: new Date().toISOString() };
   },
+  // Read-only diagnostic, kept permanently — reads the live coupon templates' actual current
+  // page size without modifying anything. Useful for confirming the one-time manual Slides
+  // UI resize (File > Page setup > Custom size) documented in CouponDocuments.gs actually
+  // took effect on the live templates, since there is no programmatic way to check or set
+  // this (confirmed live 2026-08-19 — see that file's header comment).
+  'system.diagCouponTemplateSizes': function () {
+    const templatesFolder = _ensureSubfolder_(_getRootFolder_(), 'Templates');
+    function sizeOf(name) {
+      const it = templatesFolder.getFilesByName(name);
+      if (!it.hasNext()) return { name: name, found: false };
+      const file = it.next();
+      const pres = SlidesApp.openById(file.getId());
+      return { name: name, found: true, widthPt: pres.getPageWidth(), heightPt: pres.getPageHeight() };
+    }
+    return {
+      digital: sizeOf('Digital Coupon Template'),
+      printed: sizeOf('Printed Coupon Sheet Template')
+    };
+  },
   'system.selfTest': function () {
     if (getSetting_('AllowSelfTest', 'false') !== 'true') {
       throw apiError_('FORBIDDEN', 'Self-test is disabled.');

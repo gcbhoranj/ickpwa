@@ -2,11 +2,17 @@
 // sheet PDF (a grid of 3"×2" physical coupons, all sharing the package's one QR/token) for
 // FoodPackages.gs. Same pattern as Receipts.gs: a persistent template file holds the
 // one-time-manually-resized physical page size (Slides/Advanced Slides API don't honor a
-// requested page size — confirmed live during Phase 3), content is built fresh per
-// generation with real values via `_clearSlide_`/text boxes, never `replaceAllText` tokens —
-// a static template can't render a variable-length coupon grid, and per this session's
-// Phase 3.5 receipt-overlap bug, SlidesApp.Table's row/column sizing APIs are unreliable —
-// this uses plain text boxes throughout, no Table.
+// requested page size — confirmed live during Phase 3, and re-confirmed 2026-08-19 while
+// chasing a landscape/portrait bug report: basic SlidesApp.create() always produces the
+// 720x405pt default and has no setPageSize method; the Advanced Slides Service's
+// Presentations.create() *documents* a pageSize request field but empirically ignores it —
+// two independent live calls both returned the untouched 720x405pt default despite an
+// explicit A4-portrait request; the Slides REST API also has no batchUpdate request that
+// resizes an existing presentation. There is genuinely no programmatic path here, only the
+// UI one), content is built fresh per generation with real values via `_clearSlide_`/text
+// boxes, never `replaceAllText` tokens — a static template can't render a variable-length
+// coupon grid, and per this session's Phase 3.5 receipt-overlap bug, SlidesApp.Table's row/
+// column sizing APIs are unreliable — this uses plain text boxes throughout, no Table.
 //
 // **Physical sizing not yet done**: like the temporary receipt before its one manual A5
 // resize, these templates ship at Slides' default size until an Admin resizes them once via
