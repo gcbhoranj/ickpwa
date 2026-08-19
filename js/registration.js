@@ -254,7 +254,7 @@ async function renderTeamDetail(root, user, teamId) {
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
   document.getElementById('packages-btn').addEventListener('click', function () {
-    navigateTo(renderPackagesScreen, root, user, teamId, data.team.RegistrationNumber);
+    navigateTo(renderPackagesScreen, root, user, teamId, data.team.RegistrationNumber, data.incharges);
   });
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
