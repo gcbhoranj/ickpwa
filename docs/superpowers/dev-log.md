@@ -303,3 +303,60 @@ live verification at each step, same rigor as every other phase.
 - Explicitly NOT built yet (Phase 5): the Mess QR scanner itself, the 10-point scan validity
   check (including the meal-timing grace window this phase only stored), group mess entry,
   excess-claim prevention, and meal order status.
+
+## 2026-08-19 — Phase 5 (Mess Committee panel: scanning + package sales) complete
+
+Built from a committed spec amendment (§20) after a short brainstorming round — the
+10-point validity check, QR-input approach, and MealOrderStatus/scan-gating relationship
+weren't fully pinned down anywhere in the repo, so those got nailed down with the human
+before writing the plan, along with a scope addition decided mid-round: Mess also sells food
+packages at the counter, not just Registration.
+
+- **New `Mess.gs` module.** `_currentMeal_` determines which meal (if any) is currently
+  within its configured timing window ± grace, entirely in IST (`Utilities.formatDate` with
+  `Asia/Kolkata` — existing code's `.toISOString()` pattern is UTC and would have been off by
+  5:30, a real bug caught before it shipped). `_resolveCoupon_` is the shared 10-point
+  validity resolver (points 2-8; point 1 is the caller's `requireRole_`, points 9-10 are
+  write-path only) used identically whether a coupon is found by QR token or by Coupon ID
+  (`mess.searchByCouponId` — a lost/damaged-coupon lookup goes through the same strict
+  validation, never a shortcut). `mess.recordUsage` is the locked check-and-commit: re-runs
+  the full validity check inside the script lock, rejects with the eligible/served/remaining/
+  requested numbers embedded in the error message if the claimed count exceeds remaining
+  (matching the human's own worked example — a 13-person team served in visits of 6, 6, 1,
+  with a 4th over-claim denied), and is idempotent on `ClientRequestId` so a retried request
+  (including the frontend's documented retry-on-parse-error behavior) replays the original
+  result instead of double-serving. `mess.setMealOrderStatus`/`mess.todaysSummary` round out
+  the panel — order status is purely informational (mirrored onto `MEAL_ENTITLEMENTS` for a
+  future refund rule) and never gates a scan, confirmed by a test that scans successfully
+  against a `CLOSED` meal.
+- **Denied scans are never persisted**, by design — a validation failure throws and writes
+  nothing; the on-screen rejection is itself the mess operator's cue to deny entry, keeping
+  `MEAL_USAGE` a clean ledger of actual consumption only.
+- **Package sales — Mess gets purchase/resend/reprint parity with Registration.** A role-
+  permission widening, not new backend logic: `FoodPackages.gs`'s four package actions and
+  `Registration.gs`'s `listTeams_`/`getTeamDetail_` now also allow `ROLES.MESS`.
+  `getTeamDetail_` redacts `charges`/`payments`/`receipts` to `null`/`[]`/`[]` for that role
+  (Mess needs team identity/incharges to sell a package, never Dari/security/total-payable or
+  the temp receipt) — narrowing the existing "Mess never receives payment amounts" rule to
+  exclude the Packages screen specifically, where Mess does need to see the package amount to
+  collect the right cash at the counter.
+- **QR input: camera scan with a manual-entry fallback**, both always on the Scan screen.
+  Camera decode uses the browser's native `BarcodeDetector` Shape Detection API — no vendored
+  library, no network call, matching `QrEncoder.gs`'s self-contained-encoding philosophy from
+  the other direction (decoding this time). The manual token/Coupon-ID fields are a full
+  fallback, not a secondary option, for unsupported browsers or a damaged QR either way.
+  Manual verification only (no browser extension available in this session to click through a
+  real login) — syntax-checked and confirmed served correctly, but a real device/browser
+  click-through of Scan and Current Meal is still worth the human doing once.
+- **A real, live bug found while verifying, not guessed**: the fast test bucket grew to 36
+  tests across this phase's five backend tasks and started intermittently returning Apps
+  Script's "Exceeded maximum execution time" (3 consecutive failures, not a one-off) — the
+  same 6-minute-ceiling problem Phase 4's two PDF-heavy tests caused originally, this time
+  from accumulated Sheets API round-trip cost instead of PDF generation. Fixed the same way:
+  the 7 Mess tests that build a real team+package+coupon+entitlement fixture are now flagged
+  `slow: true` too (fast bucket 29/29, slow bucket 10/10, both comfortably clear of the
+  ceiling) — and `system.selfTestSplit`'s own generalization (Task 1 of this phase, done
+  *before* this problem reappeared) meant fixing it was a one-line flag change per test, not
+  another string-matching hack.
+- All 39 tests pass (29 fast + 10 slow), verified against the live deployed Web App
+  (`@104`), not just pushed source.
