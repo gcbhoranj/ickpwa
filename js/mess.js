@@ -86,3 +86,128 @@ async function renderTodaysSummaryScreen(root, user) {
     '</div>';
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
+
+// Camera decode uses the browser's native BarcodeDetector Shape Detection API — no vendored
+// library, no network call, same self-contained principle as QrEncoder.gs's encoder. Where
+// unsupported (desktop Firefox/Safari, or a damaged/unscannable QR), the manual token field
+// below is always available as a full fallback, never just a secondary option.
+async function renderScanScreen(root, user) {
+  let stream = null;
+  let detectTimer = null;
+
+  function stopCamera() {
+    if (detectTimer) { clearInterval(detectTimer); detectTimer = null; }
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  }
+
+  function renderIdle(errorMessage) {
+    stopCamera();
+    const supportsCamera = 'BarcodeDetector' in window;
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Scan</h1>' +
+        (errorMessage ? '<div class="error">' + errorMessage + '</div>' : '') +
+        (supportsCamera
+          ? '<video id="scan-video" autoplay playsinline muted style="width:100%;max-width:360px;background:#000"></video>'
+          : '<p>Camera scanning is not supported in this browser — use manual entry below.</p>') +
+        '<h2>Manual Entry</h2>' +
+        '<label>QR Token<input type="text" id="manual-token"></label>' +
+        '<button id="lookup-token-btn">Look Up by QR Token</button>' +
+        '<label style="margin-top:8px">Coupon ID (lost/damaged coupon)<input type="text" id="manual-coupon-id"></label>' +
+        '<button id="lookup-coupon-btn">Look Up by Coupon ID</button>' +
+        '<button id="back-btn" style="margin-top:16px;background:#999">Back</button>' +
+      '</div>';
+
+    document.getElementById('lookup-token-btn').addEventListener('click', function () {
+      const token = document.getElementById('manual-token').value.trim();
+      if (token) resolveAndShow('mess.resolveToken', { qrToken: token });
+    });
+    document.getElementById('lookup-coupon-btn').addEventListener('click', function () {
+      const couponId = document.getElementById('manual-coupon-id').value.trim();
+      if (couponId) resolveAndShow('mess.searchByCouponId', { couponId: couponId });
+    });
+    document.getElementById('back-btn').addEventListener('click', function () { stopCamera(); goBack(); });
+
+    if (supportsCamera) startCamera();
+  }
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch (err) {
+      return; // camera permission denied/unavailable — manual entry above still works
+    }
+    const video = document.getElementById('scan-video');
+    if (!video) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+    video.srcObject = stream;
+    const detector = new BarcodeDetector({ formats: ['qr_code'] });
+    detectTimer = setInterval(async function () {
+      if (!video.videoWidth) return;
+      try {
+        const barcodes = await detector.detect(video);
+        if (barcodes.length > 0) {
+          resolveAndShow('mess.resolveToken', { qrToken: barcodes[0].rawValue });
+        }
+      } catch (err) { /* transient decode failure — keep polling */ }
+    }, 350);
+  }
+
+  async function resolveAndShow(action, payload) {
+    stopCamera();
+    root.innerHTML = '<div class="wizard-card"><h1>Scan</h1><p>Looking up…</p></div>';
+    let resolved;
+    try {
+      resolved = await apiCall(action, payload);
+    } catch (err) {
+      renderIdle(err.message);
+      return;
+    }
+    renderConfirm(resolved);
+  }
+
+  function renderConfirm(resolved) {
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Scan</h1>' +
+        '<p class="subtitle">' + resolved.collegeName + ' — Package ' + resolved.packageNumber + '</p>' +
+        '<p>' + resolved.meal + ' (' + resolved.date + ')</p>' +
+        '<table><tbody>' +
+          '<tr><th>Eligible</th><td>' + resolved.eligiblePersons + '</td></tr>' +
+          '<tr><th>Already Served</th><td>' + resolved.servedPersons + '</td></tr>' +
+          '<tr><th>Remaining</th><td>' + resolved.remainingPersons + '</td></tr>' +
+        '</tbody></table>' +
+        '<div id="scan-error" class="error" style="display:none"></div>' +
+        '<label>How many are eating right now?<input type="number" id="claim-count" min="1" value="' + resolved.remainingPersons + '"></label>' +
+        '<button id="confirm-btn">Confirm</button>' +
+        '<button id="deny-btn" style="background:#999">Deny / Scan Next</button>' +
+      '</div>';
+
+    document.getElementById('confirm-btn').addEventListener('click', async function () {
+      const errEl = document.getElementById('scan-error');
+      errEl.style.display = 'none';
+      const count = parseInt(document.getElementById('claim-count').value, 10);
+      try {
+        const result = await apiCall('mess.recordUsage', { qrToken: resolved.qrToken, count: count });
+        renderSuccess(result);
+      } catch (err) {
+        errEl.textContent = err.message; // the eligible/served/remaining/requested numbers are already visible above
+        errEl.style.display = 'block';
+      }
+    });
+    document.getElementById('deny-btn').addEventListener('click', function () { renderIdle(null); });
+  }
+
+  function renderSuccess(result) {
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Scan</h1>' +
+        '<p>' + result.collegeName + ' — ' + result.meal + ': served, remaining now ' + result.remainingPersons + '.' + (result.replay ? ' (duplicate submission, no change made)' : '') + '</p>' +
+        '<button id="scan-next-btn">Scan Next</button>' +
+        '<button id="back-btn" style="background:#999">Back to Dashboard</button>' +
+      '</div>';
+    document.getElementById('scan-next-btn').addEventListener('click', function () { renderIdle(null); });
+    document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
+  }
+
+  renderIdle(null);
+}
