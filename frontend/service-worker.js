@@ -3,7 +3,7 @@
 // version number here means returning users keep getting the old app shell forever. See
 // README.md "Known Gotchas". Bumped to v6 for Phase 3.5 (added js/settings.js, js/rooms.js,
 // js/accommodation.js — Admin Settings, Admin Rooms, and the Accommodation Dashboard).
-const CACHE_NAME = 'hpuick-shell-v13';
+const CACHE_NAME = 'hpuick-shell-v14';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/packages.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',

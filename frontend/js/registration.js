@@ -236,15 +236,20 @@ async function renderTeamDetail(root, user, teamId) {
       '<p class="subtitle">' + data.team.RegistrationNumber + ' &middot; ' + data.team.DistrictName + ' &middot; ' + data.team.Status + '</p>' +
       '<h2>Incharges</h2>' +
       '<ul>' + data.incharges.map(function (i) { return '<li>' + i.Name + (i.IsPrimary === 'true' ? ' (Primary)' : '') + '</li>'; }).join('') + '</ul>' +
-      (data.charges
-        ? '<p>' + [
-            Number(data.charges.DariCharges) > 0 ? 'Dari: Rs ' + data.charges.DariCharges : null,
-            Number(data.charges.SecurityCharges) > 0 ? 'Security: Rs ' + data.charges.SecurityCharges : null
-          ].filter(function (s) { return s; }).join(' &middot; ') + '</p>'
-        : '<p>Charges not yet calculated.</p>') +
-      (receipt
-        ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'
-        : '<p>No receipt generated yet.</p>') +
+      // MESS never sees Dari/security/total-payable or the temp receipt (backend redacts
+      // these fields to null/[] for that role — getTeamDetail_, spec §20) — the frontend
+      // simply skips rendering the sections rather than showing a misleading "not yet" state.
+      (user.role !== 'MESS'
+        ? (data.charges
+            ? '<p>' + [
+                Number(data.charges.DariCharges) > 0 ? 'Dari: Rs ' + data.charges.DariCharges : null,
+                Number(data.charges.SecurityCharges) > 0 ? 'Security: Rs ' + data.charges.SecurityCharges : null
+              ].filter(function (s) { return s; }).join(' &middot; ') + '</p>'
+            : '<p>Charges not yet calculated.</p>') +
+          (receipt
+            ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'
+            : '<p>No receipt generated yet.</p>')
+        : '') +
       '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
