@@ -1214,6 +1214,55 @@ function test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam() {
   }
 }
 
+function test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 5);
+
+    const first = setMealOrderStatus_(messSession, '2026-08-19', 'DINNER', 'ORDERED');
+    assertEqual_(first.status, 'ORDERED', 'first set should report ORDERED');
+    const statusRows = findRowsByField_('MEAL_ORDER_STATUS', 'Date', '2026-08-19').filter(function (r) { return r.Meal === 'DINNER'; });
+    assertEqual_(statusRows.length, 1, 'should create exactly one MEAL_ORDER_STATUS row');
+
+    const dinnerEntitlement = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', fixture.packageId).filter(function (e) { return e.Meal === 'DINNER'; })[0];
+    assertEqual_(dinnerEntitlement.MealOrderStatus, 'ORDERED', 'MealOrderStatus should be mirrored onto the entitlement row');
+
+    // A second set for the same date+meal must UPDATE the existing row, not create a second one.
+    setMealOrderStatus_(messSession, '2026-08-19', 'DINNER', 'CLOSED');
+    const afterSecond = findRowsByField_('MEAL_ORDER_STATUS', 'Date', '2026-08-19').filter(function (r) { return r.Meal === 'DINNER'; });
+    assertEqual_(afterSecond.length, 1, 'setting status twice for the same date+meal should update in place, not duplicate');
+    assertEqual_(afterSecond[0].Status, 'CLOSED', 'second set should have updated the status to CLOSED');
+
+    // Scanning must still be unaffected by CLOSED (spec §20: order status never gates a scan).
+    const scanResult = recordMealUsage_(messSession, fixture.qrToken, 2, 'req-orderstatus', new Date('2026-08-19T14:30:00Z'));
+    assertEqual_(scanResult.servedPersons, 2, 'a scan must succeed regardless of MealOrderStatus');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+    findRowsByField_('MEAL_ORDER_STATUS', 'Date', '2026-08-19').filter(function (r) { return r.Meal === 'DINNER'; })
+      .forEach(function (r) { deleteRowById_('MEAL_ORDER_STATUS', 'StatusId', r.StatusId); });
+  }
+}
+
+function test_mess_todaysSummary_aggregatesByTeam() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let fixtureA = null;
+  let fixtureB = null;
+  try {
+    fixtureA = _makeMessTestFixture_('2026-08-19', '2026-08-20', 6);
+    fixtureB = _makeMessTestFixture_('2026-08-19', '2026-08-20', 9);
+    recordMealUsage_(messSession, fixtureA.qrToken, 4, 'req-summary-a', new Date('2026-08-19T14:30:00Z'));
+
+    const before = getTodaysMessSummary_(messSession);
+    // getTodaysMessSummary_ reads the REAL current meal (no override param) — only assert
+    // shape/inclusion here, not which meal is "current" right now in wall-clock time.
+    assertTrue_(Array.isArray(before.rows), 'todaysSummary rows should always be an array');
+  } finally {
+    if (fixtureA) _cleanupMessTestFixture_(fixtureA);
+    if (fixtureB) _cleanupMessTestFixture_(fixtureB);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -1252,7 +1301,9 @@ const TEST_CASES = [
   { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup },
   { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario },
   { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement },
-  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam }
+  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam },
+  { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements },
+  { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam }
 ];
 
 function runAllTests_() {

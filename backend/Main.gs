@@ -199,6 +199,14 @@ const ACTIONS = {
   'mess.recordUsage': function (payload, sessionId, requestId) {
     const session = requireSession_(sessionId);
     return recordMealUsage_(session, payload.qrToken, payload.count, requestId);
+  },
+  'mess.setMealOrderStatus': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return setMealOrderStatus_(session, payload.date, payload.meal, payload.status);
+  },
+  'mess.todaysSummary': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getTodaysMessSummary_(session);
   }
 };
 

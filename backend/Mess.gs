@@ -180,3 +180,52 @@ function recordMealUsage_(actorSession, qrToken, count, clientRequestId, nowOver
     lock.releaseLock();
   }
 }
+
+function setMealOrderStatus_(actorSession, date, meal, status) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.MESS]);
+  if (!date) throw apiError_('VALIDATION_ERROR', 'Date is required.');
+  if (['BREAKFAST', 'LUNCH', 'DINNER'].indexOf(meal) === -1) throw apiError_('VALIDATION_ERROR', 'Meal must be BREAKFAST, LUNCH, or DINNER.');
+  if (['NOT_ORDERED', 'ORDERED', 'CLOSED'].indexOf(status) === -1) throw apiError_('VALIDATION_ERROR', 'Status must be NOT_ORDERED, ORDERED, or CLOSED.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const now = new Date().toISOString();
+    const existing = findRowsByField_('MEAL_ORDER_STATUS', 'Date', date).filter(function (r) { return r.Meal === meal; })[0];
+    if (existing) {
+      updateRowById_('MEAL_ORDER_STATUS', 'StatusId', existing.StatusId, { Status: status, SetBy: actorSession.userId, SetAt: now });
+    } else {
+      appendRow_('MEAL_ORDER_STATUS', { StatusId: nextId_('STA', 4), Date: date, Meal: meal, Status: status, SetBy: actorSession.userId, SetAt: now });
+    }
+    // Mirror onto every matching entitlement row (schema's documented intent: MEAL_ENTITLEMENTS.
+    // MealOrderStatus "mirrors MEAL_ORDER_STATUS for that date+meal") — the future refund rule
+    // reads it directly off the entitlement row rather than cross-referencing this sheet.
+    findRowsByField_('MEAL_ENTITLEMENTS', 'Date', date).filter(function (e) { return e.Meal === meal; })
+      .forEach(function (e) { updateRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', e.EntitlementId, { MealOrderStatus: status }); });
+    appendRow_('AUDIT_LOG', {
+      AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+      Action: 'SET_MEAL_ORDER_STATUS', Entity: 'MEAL_ORDER_STATUS', EntityId: date + '/' + meal,
+      PreviousState: existing ? existing.Status : '', NewState: status
+    });
+    return { date: date, meal: meal, status: status };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getTodaysMessSummary_(actorSession) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
+  const current = _currentMeal_();
+  const date = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!current) return { date: date, meal: null, rows: [] };
+  const rows = findRowsByField_('MEAL_ENTITLEMENTS', 'Date', current.date)
+    .filter(function (e) { return e.Meal === current.meal; })
+    .map(function (e) {
+      const team = findRowById_('TEAMS', 'TeamId', e.TeamId);
+      return {
+        teamId: e.TeamId, collegeName: team ? team.values.CollegeName : e.TeamId,
+        eligiblePersons: Number(e.EligiblePersons), servedPersons: Number(e.ServedPersons), remainingPersons: Number(e.RemainingPersons)
+      };
+    });
+  return { date: current.date, meal: current.meal, rows: rows };
+}
