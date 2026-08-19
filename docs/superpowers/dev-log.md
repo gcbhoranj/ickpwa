@@ -126,3 +126,80 @@ phase so this can't be forgotten a third time.
 - Explicitly NOT built yet (later phases): food packages/meal charges/coupons (Phase 4),
   mess scanning, accommodation, refunds, the Final Receipt and its amount-in-words
   conversion, reports, and the Admin Settings frontend screen noted above.
+
+## 2026-08-19 — Phase 3.5 (Admin Settings, Dari Correction & Accommodation) complete
+
+- **Dari charge correction**: `registration.calculateCharges` now charges Dari on team
+  members only (`rate × NumberOfTeamMembers`), not the total contingent — incharges get a
+  real room via Accommodation, not a dari/mat, so charging them for one was wrong. This
+  supersedes Phase 3's original formula.
+- **Admin Settings screen** (frontend): closes the gap Phase 3 explicitly deferred — Admin
+  can now view/update all five rates and the financial lock through a real screen instead of
+  curl.
+- **Room Master, pulled forward from the real future Phase 6**: every room is one of two
+  types (`ROOM_TYPES.TEAM` / `INCHARGE`), added mid-phase after live feedback — the original
+  plan had one undifferentiated room pool. Team rooms are on-campus and Accommodation-
+  allocated; incharge rooms are rest houses/hotels, created by Admin via Room Master (same
+  allocation flow, per the human's explicit call after considering an informational-only
+  alternative). A room only ever accepts allocations of its own type
+  (`ROOM_TYPE_MISMATCH` guard). Capacity/remaining is always computed live from ACCOMMODATION
+  rows, never stored, so it can't drift.
+- **Accommodation, also widened after live feedback**: the original plan only covered
+  incharges (opt-in via `CONTINGENT_INCHARGES.NeedsAccommodation`, flagged at registration).
+  Team-member accommodation was added as a second, independent kind — every registered
+  team's own members (`TEAMS.NumberOfTeamMembers`), unconditional, no opt-in flag needed.
+  `ACCOMMODATION` gained a `SubjectType` (`TEAM` / `INCHARGE`) so a team's member-allocation
+  and incharge-allocation progress track independently; a partial allocation (e.g. 13 of a
+  30-capacity room) correctly leaves the room open for another team. Still deliberately
+  narrow: allocate only — no reallocate/vacate/NOC, which depend on the departure workflow
+  and stay in the real future Phase 6.
+- **Per-item charge checkboxes**, added after live feedback: the Registration operator ticks
+  which charges apply (Dari, Security) before calculating — an unticked item is charged as 0
+  and left off the printed receipt entirely, not shown as "Rs 0". `calculateCharges_` takes
+  `includeDari`/`includeSecurity` (default true, so pre-existing callers/tests are
+  unaffected).
+- **Receipt generation redesigned**, also after live feedback: previously a template file
+  was pre-built once and reused per receipt via `replaceAllText({{TOKEN}})` — a static
+  template can't conditionally omit a line, which the checkbox feature above needed. Receipts
+  are now built fresh per team with real values directly (`_buildReceiptLayout_(pres, data)`);
+  `createTemporaryReceiptTemplate_` now only exists to hold the one-time A5 page-size resize
+  and leaves the template's slide blank.
+- **Receipt overlap bug, root-caused and fixed**: the charges block was originally a
+  `SlidesApp.Table`. Its row height silently grows past whatever height is requested (a
+  Slides platform behavior), but that growth is never reflected back into the script's
+  object model — `Table.getHeight()` kept reporting the small requested height, so the next
+  line's position undershot and overlapped the table. Two follow-up attempts to fix it via
+  column widths (`TableColumn.setWidth()`, then `Table.setColumnWidth()`) both don't exist on
+  this API and threw `is not a function` live — confirmed, not guessed, against the real
+  deployed script both times. Replaced the Table entirely with plain text-box rows (the same
+  mechanics already used for every other line in the layout) plus a decorative border sized
+  from a height the code controls directly, removing the whole class of bug. Verified by
+  temporarily adding a diagnostic action (fully removed once confirmed, same technique as
+  Phase 2's Active-flag bug) that rebuilt the live template, generated a real receipt PDF, and
+  downloaded it for direct visual inspection — three iterations, catching a second smaller
+  issue (the border line sitting on the last row's text baseline) before it was shown to the
+  human again.
+- **In-app navigation history** (frontend): every screen was a function overwriting
+  `#app-root`'s innerHTML with no browser History API involvement, so the physical/hardware
+  back button (or an edge-swipe gesture) had nothing of the app's to step back into — it
+  exited the page outright, closing an installed/kiosk PWA entirely. Added
+  `navigateTo`/`navigateReplace`/`resetNavigation`/`goBack` in `app.js`: `navigateTo` pushes
+  one history entry per screen change and keeps its own `{fn, args}` stack; a `popstate`
+  re-renders the previous screen instead of leaving the app. Every screen's own "Back" button
+  now calls `goBack()` too, so the on-screen button and the physical button stay in sync
+  automatically. Multi-step flows (the registration wizard, the accommodation allocate-room
+  form) count as one stack entry each — going back from inside one returns to the dashboard
+  that opened it, rather than trying to undo already-applied side effects (a created team, a
+  recorded payment) step by step.
+- Verified live end-to-end on `https://gcbhoranj.github.io/ickpwa/` across several rounds of
+  human feedback, not just the automated suite: Admin rate/lock updates, Room Master (both
+  room types), a full registration with a flagged incharge and the Dari/Security checkboxes,
+  partial team-room allocation (13 of 30 correctly leaving 17 remaining and re-allocatable),
+  incharge-room allocation, and the corrected receipt PDF (no overlap, correct Dari basis,
+  signature line). `system.selfTest` reports 23/25 against the live backend — the 2 failures
+  are pre-existing and environmental (the financial lock currently left `true` from the
+  human's own live testing), not code defects.
+- Explicitly NOT built yet (later phases): reallocation, vacating, NOC issuance, and
+  per-team-member (as opposed to per-team) room allocation — all remain in the real future
+  Phase 6; food packages/meal charges/coupons/QR remain Phase 4; mess scanning, refunds, the
+  Final Receipt and its amount-in-words conversion, and reports remain later phases.
