@@ -19,9 +19,9 @@ function _pendingSection(kind, title, pending, noneText) {
 function _roomsSection(title, rooms) {
   if (rooms.length === 0) return '<h2>' + title + '</h2><p>None yet.</p>';
   return '<h2>' + title + '</h2>' +
-    '<table><thead><tr><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
+    '<table><thead><tr><th>Building / Hotel</th><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
       rooms.map(function (r) {
-        return '<tr><td>' + r.roomNumber + '</td><td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
+        return '<tr><td>' + r.building + '</td><td>' + r.roomNumber + '</td><td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
       }).join('') +
     '</tbody></table>';
 }
@@ -74,7 +74,7 @@ async function renderAccommodationDashboard(root, user) {
         '<form id="allocate-form">' +
           '<label>Room<select id="allocate-room">' +
             availableRooms.map(function (r) {
-              return '<option value="' + r.roomId + '">' + r.roomNumber + ' (remaining: ' + r.remaining + ')</option>';
+              return '<option value="' + r.roomId + '">' + (r.building ? r.building + ' — ' : '') + r.roomNumber + ' (remaining: ' + r.remaining + ')</option>';
             }).join('') +
           '</select></label>' +
           '<label>Persons to Allocate<input type="number" id="allocate-persons" min="1" max="' + remaining + '" value="1" required></label>' +
