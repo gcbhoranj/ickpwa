@@ -72,6 +72,11 @@ function _buildReceiptLayout_(pres) {
 
   const tableHeight = pageHeight * 0.16;
   const table = slide.insertTable(4, 2, margin, y, contentWidth, tableHeight);
+  // Amounts are short (a few digits) — give Description most of the width so its longest
+  // strings ("Security (refundable, not a charge)") stay on one line instead of wrapping
+  // and growing the row taller than the fixed `tableHeight` reserved below.
+  table.getColumn(0).setWidth(contentWidth * 0.72);
+  table.getColumn(1).setWidth(contentWidth * 0.28);
   table.getCell(0, 0).getText().setText('Description');
   table.getCell(0, 1).getText().setText('Amount (Rs)');
   table.getCell(1, 0).getText().setText('Dari Charges ({{TEAM_MEMBERS}} x Rs {{DARI_RATE}})');
@@ -85,11 +90,13 @@ function _buildReceiptLayout_(pres) {
       table.getCell(r, c).getText().getTextStyle().setFontSize(8);
     }
   }
-  // Use the table's actual rendered height, not the requested `tableHeight` — Slides
-  // auto-grows row height to fit wrapped cell text (e.g. the long Dari Charges description),
-  // so the real table is often taller than requested. Using the requested height here caused
-  // "Total Amount Received" to overlap the table's last row in practice.
-  y += table.getHeight() + pageHeight * 0.025;
+  // Use the table's actual rendered height, not the requested `tableHeight` — Slides can
+  // still auto-grow row height beyond what was requested (e.g. if a cell's text wraps), so
+  // the real table can be taller than requested. Using the requested height here caused
+  // "Total Amount Received" to overlap the table's last row in practice. The extra 0.04
+  // (vs. the previous 0.025) is a defensive margin on top of the measured height, in case
+  // getHeight() is read before Slides has fully committed a very-last-moment row resize.
+  y += table.getHeight() + pageHeight * 0.04;
 
   addLine('Total Amount Received (Mode: {{PAYMENT_MODE}}): Rs {{TOTAL_RECEIVED}}', 0.06, 10, { bold: true, left: true });
   y += pageHeight * 0.02;
