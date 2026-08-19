@@ -108,7 +108,8 @@ async function renderScanScreen(root, user) {
         '<h1>Scan</h1>' +
         (errorMessage ? '<div class="error">' + errorMessage + '</div>' : '') +
         (supportsCamera
-          ? '<video id="scan-video" autoplay playsinline muted style="width:100%;max-width:360px;background:#000"></video>'
+          ? '<video id="scan-video" autoplay playsinline muted style="width:100%;max-width:360px;background:#000"></video>' +
+            '<p id="camera-status" style="color:#666;font-size:0.9em"></p>'
           : '<p>Camera scanning is not supported in this browser — use manual entry below.</p>') +
         '<h2>Manual Entry</h2>' +
         '<label>QR Token<input type="text" id="manual-token"></label>' +
@@ -131,16 +132,42 @@ async function renderScanScreen(root, user) {
     if (supportsCamera) startCamera();
   }
 
+  function setCameraStatus(text) {
+    const el = document.getElementById('camera-status');
+    if (el) el.textContent = text;
+  }
+
   async function startCamera() {
+    // BarcodeDetector existing on `window` does not mean QR detection actually works — some
+    // browsers expose the constructor but have no working native backend for it (a real,
+    // known gap outside Android Chrome). Both checks below fail silently by default; surface
+    // a clear status instead so a mess operator knows to use manual entry rather than stand
+    // there wondering why nothing is happening.
+    let detector;
+    try {
+      if (BarcodeDetector.getSupportedFormats) {
+        const supported = await BarcodeDetector.getSupportedFormats();
+        if (supported.indexOf('qr_code') === -1) {
+          setCameraStatus('This browser\'s camera cannot read QR codes — use manual entry below.');
+          return;
+        }
+      }
+      detector = new BarcodeDetector({ formats: ['qr_code'] });
+    } catch (err) {
+      setCameraStatus('Camera QR detection is not available in this browser (' + err.message + ') — use manual entry below.');
+      return;
+    }
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     } catch (err) {
-      return; // camera permission denied/unavailable — manual entry above still works
+      setCameraStatus('Camera unavailable (' + err.message + ') — use manual entry below.');
+      return;
     }
     const video = document.getElementById('scan-video');
     if (!video) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
     video.srcObject = stream;
-    const detector = new BarcodeDetector({ formats: ['qr_code'] });
+    setCameraStatus('Point the camera at the coupon\'s QR code.');
     detectTimer = setInterval(async function () {
       if (!video.videoWidth) return;
       try {
