@@ -40,6 +40,11 @@ const ACTIONS = {
   // UI resize (File > Page setup > Custom size) documented in CouponDocuments.gs actually
   // took effect on the live templates, since there is no programmatic way to check or set
   // this (confirmed live 2026-08-19 — see that file's header comment).
+  'system.diagQrMatrix': function (payload) {
+    const token = (payload && payload.token) || 'DIAGTEST12AB';
+    const qr = qrEncode_(token);
+    return { token: token, size: qr.size, matrix: qr.matrix };
+  },
   'system.diagCouponTemplateSizes': function () {
     const templatesFolder = _ensureSubfolder_(_getRootFolder_(), 'Templates');
     function sizeOf(name) {

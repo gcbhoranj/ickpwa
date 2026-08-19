@@ -879,9 +879,11 @@ function test_qrEncoder_structuralValidity() {
   assertTrue_(anyDifferent, 'encoding two different tokens produced identical matrices — data is not reaching the output');
 
   // Token too long for the supported version range is rejected, not silently truncated.
+  // Level-M byte-mode capacity tops out at version 40 (~2331 bytes) — 2500 'X's exceeds even
+  // that, unlike the old versions-1-6-only encoder where ~106 bytes was already too long.
   let threwTooLong = false;
   try {
-    qrEncode_(new Array(200).join('X'));
+    qrEncode_(new Array(2501).join('X'));
   } catch (err) {
     threwTooLong = true;
     assertEqual_(err.code, 'QR_TOKEN_TOO_LONG', 'wrong error code for an over-length token');

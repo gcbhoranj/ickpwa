@@ -1,285 +1,438 @@
 // QrEncoder.gs — self-contained QR code matrix encoder (no external network call, per design
 // spec §10 — the tournament can't depend on a third-party service being up mid-event).
-// Supports QR versions 1-6, Byte mode, error-correction level M, a FIXED mask pattern (0).
-// Using a fixed mask instead of evaluating all 8 candidate masks for lowest penalty score is a
-// deliberate scope reduction: per the ISO/IEC 18004 standard, ANY of the 8 mask patterns
-// produces a fully valid, scannable QR code — mask selection is a scan-reliability
-// *optimization*, not a correctness requirement, and skipping it removes a large surface for
-// transcription bugs. GF(256) log/exp tables and generator polynomials are computed
-// algorithmically at runtime (not hardcoded) for the same reason — only the small
-// per-version block-count/capacity table and alignment-pattern-position table below are
-// literal constants, keeping the amount of "must be exactly right from memory" data as small
-// as possible.
+// Byte mode, error-correction level M, any QR version 1-40 (auto-selected by data length).
 //
-// **This code has not been verified against a real QR scanner as of authoring — flagged
-// explicitly for a real-device scan test before being considered trustworthy.**
+// REWRITTEN 2026-08-19: the original hand-rolled implementation (Phase 4) was found live to
+// produce QR codes that no real scanner — or an independent third-party decoder — could read
+// at all, discovered chasing a "QR not recognized" bug report. Its own structural test only
+// checked finder/timing patterns were present, never actual decodability (its header even
+// flagged this: "not yet verified against a real QR scanner"). Verification method: dumped
+// the raw matrix via a diagnostic action, fed it to `jsQR` (an established third-party
+// decoder) through a rendering harness first validated with a known-good reference encoder
+// (`qrcode` npm package) — the control test decoded correctly, the project's own encoder's
+// output did not decode at all. Manually diffing the two implementations found a concrete
+// bug: `_qrPlaceFormatInfo_`'s cell-index mapping had rows and columns transposed for the
+// top-left format-info bits versus the ISO/IEC 18004 spec — exactly the kind of
+// easy-to-transcribe-wrong bug format-info placement invites.
+//
+// Rather than patch that implementation bug-by-bug (real risk of missing another one just
+// like it elsewhere), this is a fresh, faithful line-for-line port of the `qrcode` npm
+// package's core algorithm (MIT licensed, itself based on Kazuhiko Arase's public-domain
+// "QRCode for JavaScript") — kept structurally close to that verified reference rather than
+// reorganized, specifically so it stays easy to diff against a working implementation if a
+// bug is ever suspected again. GF(256) log/exp tables and generator polynomials are computed
+// algorithmically at runtime, not hardcoded, for the same "less to transcribe wrong" reason
+// the original file already followed. Verified against jsQR before being committed (see
+// dev-log) — this must not ship again without that same live decode check.
 
-const QR_MODE_BYTE = 4; // mode indicator nibble for 8-bit byte mode
+const QR_MODE_BYTE = { bit: 1 << 2, ccBits: [8, 16, 16] }; // char-count indicator bits: v1-9, v10-26, v27-40
+const QR_EC_LEVEL_M_BIT = 0; // format-info's 2-bit error-correction-level field for level M
 
-// [version]: { totalCodewords, dataCodewordsPerBlock, eccCodewordsPerBlock, numBlocks }
-// Level M only, versions 1-6 only (byte-mode capacity: v1=14, v2=26, v3=42, v4=62 (2 blocks x
-// 31... see below), v5=84, v6=106 usable data bytes after the 3-byte mode+length header —
-// comfortably covers any reasonable token length for this project).
-const QR_RS_BLOCK_TABLE_M = {
-  1: { totalCodewords: 26, dataPerBlock: 16, eccPerBlock: 10, numBlocks: 1 },
-  2: { totalCodewords: 44, dataPerBlock: 28, eccPerBlock: 16, numBlocks: 1 },
-  3: { totalCodewords: 70, dataPerBlock: 44, eccPerBlock: 26, numBlocks: 1 },
-  4: { totalCodewords: 100, dataPerBlock: 32, eccPerBlock: 18, numBlocks: 2 },
-  5: { totalCodewords: 134, dataPerBlock: 43, eccPerBlock: 24, numBlocks: 2 },
-  6: { totalCodewords: 172, dataPerBlock: 27, eccPerBlock: 16, numBlocks: 4 }
-};
+// version -> total codewords (data + error correction) for that symbol size.
+const QR_TOTAL_CODEWORDS = [0,
+  26, 44, 70, 100, 134, 172, 196, 242, 292, 346,
+  404, 466, 532, 581, 655, 733, 815, 901, 991, 1085,
+  1156, 1258, 1364, 1474, 1588, 1706, 1828, 1921, 2051, 2185,
+  2323, 2465, 2611, 2761, 2876, 3034, 3196, 3362, 3532, 3706
+];
 
-// Alignment pattern coordinate list per version (versions 1-6 use at most a 2-element list;
-// version 1 has none). Positions that would overlap a finder-pattern zone (any coordinate
-// pair within 8 modules of a corner) are skipped when placing.
-const QR_ALIGNMENT_COORDS = { 1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34] };
+// version -> [ecBlocks, ecCodewords] for error-correction level M only (this project's only
+// supported level — see file header).
+const QR_EC_M = [
+  [1, 10], [1, 16], [1, 26], [2, 36], [2, 48], [4, 64], [4, 72], [4, 88], [5, 110], [5, 130],
+  [5, 150], [8, 176], [9, 198], [9, 216], [10, 240], [10, 280], [11, 308], [13, 338], [14, 364], [16, 416],
+  [17, 442], [17, 476], [18, 504], [20, 560], [21, 588], [23, 644], [25, 700], [26, 728], [28, 784], [29, 812],
+  [31, 868], [33, 924], [35, 980], [37, 1036], [38, 1064], [40, 1120], [43, 1204], [45, 1260], [47, 1316], [49, 1372]
+];
 
-function _qrModuleCount_(version) {
-  return 17 + 4 * version;
+function _qrSymbolSize_(version) { return version * 4 + 17; }
+
+function _qrBCHDigit_(data) {
+  let digit = 0;
+  while (data !== 0) { digit++; data >>>= 1; }
+  return digit;
 }
 
-function _qrBuildGaloisTables_() {
-  const EXP = new Array(256);
+// --- Galois Field GF(256) --------------------------------------------------------------
+function _qrGF_() {
+  const EXP = new Array(512);
   const LOG = new Array(256);
   let x = 1;
   for (let i = 0; i < 255; i++) {
     EXP[i] = x;
     LOG[x] = i;
-    x = x << 1;
-    if (x & 0x100) x = x ^ 0x11D; // primitive polynomial x^8 + x^4 + x^3 + x^2 + 1
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11D; // QR spec's primitive polynomial x^8+x^4+x^3+x^2+1
   }
   for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
-  return { EXP: EXP, LOG: LOG };
+  return {
+    exp: function (n) { return EXP[n]; },
+    log: function (n) { return LOG[n]; },
+    mul: function (a, b) { if (a === 0 || b === 0) return 0; return EXP[LOG[a] + LOG[b]]; }
+  };
 }
 
-function _qrGfMul_(a, b, gf) {
-  if (a === 0 || b === 0) return 0;
-  return gf.EXP[(gf.LOG[a] + gf.LOG[b]) % 255];
-}
-
-// Multiplies two polynomials (arrays of coefficients, highest degree first) over GF(256).
-function _qrPolyMultiply_(p1, p2, gf) {
-  const result = new Array(p1.length + p2.length - 1).fill(0);
+function _qrPolyMul_(p1, p2, gf) {
+  const coeff = new Array(p1.length + p2.length - 1).fill(0);
   for (let i = 0; i < p1.length; i++) {
     for (let j = 0; j < p2.length; j++) {
-      result[i + j] ^= _qrGfMul_(p1[i], p2[j], gf);
+      coeff[i + j] ^= gf.mul(p1[i], p2[j]);
     }
   }
-  return result;
+  return coeff;
 }
 
-// Builds the generator polynomial for `eccCount` error-correction codewords:
-// (x - EXP[0])(x - EXP[1])...(x - EXP[eccCount-1])
-function _qrGeneratorPolynomial_(eccCount, gf) {
+function _qrGenerateECPolynomial_(degree, gf) {
   let poly = [1];
-  for (let i = 0; i < eccCount; i++) {
-    poly = _qrPolyMultiply_(poly, [1, gf.EXP[i]], gf);
-  }
+  for (let i = 0; i < degree; i++) poly = _qrPolyMul_(poly, [1, gf.exp(i)], gf);
   return poly;
 }
 
-// Reed-Solomon encode: returns the ECC codewords for one block of data codewords.
-function _qrRsEncodeBlock_(dataCodewords, eccCount, gf) {
-  const generator = _qrGeneratorPolynomial_(eccCount, gf);
-  const buffer = dataCodewords.concat(new Array(eccCount).fill(0));
+// Reed-Solomon: returns the `degree` error-correction codewords for one block of data
+// codewords, via polynomial long division in GF(256) (the standard LFSR-style formulation —
+// equivalent to, but faster than, repeated polynomial-mod-with-leading-zero-stripping).
+function _qrReedSolomonEncode_(dataCodewords, degree, gf) {
+  const genPoly = _qrGenerateECPolynomial_(degree, gf);
+  const buffer = dataCodewords.concat(new Array(degree).fill(0));
   for (let i = 0; i < dataCodewords.length; i++) {
-    const coef = buffer[i];
-    if (coef === 0) continue;
-    const factor = gf.LOG[coef];
-    for (let j = 0; j < generator.length; j++) {
-      if (generator[j] === 0) continue;
-      buffer[i + j] ^= gf.EXP[(factor + gf.LOG[generator[j]]) % 255];
+    const coeff = buffer[i];
+    if (coeff === 0) continue;
+    for (let j = 0; j < genPoly.length; j++) {
+      buffer[i + j] ^= gf.mul(genPoly[j], coeff);
     }
   }
   return buffer.slice(dataCodewords.length);
 }
 
-// Picks the smallest supported version (1-6) whose Level-M data capacity fits the payload
-// (mode nibble + 8-bit length + the byte data itself).
+// --- Bit buffer --------------------------------------------------------------------------
+function _qrBitBuffer_() {
+  return {
+    buffer: [], length: 0,
+    putBit: function (bit) {
+      const bufIndex = Math.floor(this.length / 8);
+      if (this.buffer.length <= bufIndex) this.buffer.push(0);
+      if (bit) this.buffer[bufIndex] |= (0x80 >>> (this.length % 8));
+      this.length++;
+    },
+    put: function (num, len) {
+      for (let i = 0; i < len; i++) this.putBit(((num >>> (len - i - 1)) & 1) === 1);
+    }
+  };
+}
+
+// --- Version / capacity ------------------------------------------------------------------
+function _qrCharCountIndicatorBits_(version) {
+  if (version < 10) return QR_MODE_BYTE.ccBits[0];
+  if (version < 27) return QR_MODE_BYTE.ccBits[1];
+  return QR_MODE_BYTE.ccBits[2];
+}
+
+function _qrCapacityBytes_(version) {
+  const totalCodewords = QR_TOTAL_CODEWORDS[version];
+  const ecCodewords = QR_EC_M[version - 1][1];
+  const dataBits = (totalCodewords - ecCodewords) * 8;
+  const usableBits = dataBits - (4 + _qrCharCountIndicatorBits_(version)); // mode nibble + char count
+  return Math.floor(usableBits / 8);
+}
+
 function _qrSelectVersion_(byteLength) {
-  for (let v = 1; v <= 6; v++) {
-    const block = QR_RS_BLOCK_TABLE_M[v];
-    const totalDataCodewords = block.dataPerBlock * block.numBlocks;
-    // 1 byte for mode+length header (4-bit mode nibble + 8-bit length fits in 12 bits,
-    // rounds up to 2 bytes) + the payload bytes, must fit within totalDataCodewords.
-    if (byteLength + 2 <= totalDataCodewords) return v;
+  for (let v = 1; v <= 40; v++) {
+    if (byteLength <= _qrCapacityBytes_(v)) return v;
   }
-  throw apiError_('QR_TOKEN_TOO_LONG', 'Token is too long to encode at supported QR versions (max ~104 bytes).');
+  throw apiError_('QR_TOKEN_TOO_LONG', 'Token is too long to encode in a QR code (max ~2950 bytes).');
 }
 
-// Builds the full data-codeword sequence (mode + length + payload bytes + padding),
-// split across blocks, then Reed-Solomon-encoded and interleaved per the standard's
-// codeword-interleaving rule (round-robin across blocks, data first then ECC).
-function _qrBuildCodewords_(text, version, gf) {
-  const block = QR_RS_BLOCK_TABLE_M[version];
-  const totalDataCodewords = block.dataPerBlock * block.numBlocks;
-  const bytes = [];
-  for (let i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xFF);
-
-  // Bit buffer: mode (4 bits) + length (8 bits, byte-mode length field for versions 1-9) +
-  // data bytes (8 bits each) + terminator/padding to fill totalDataCodewords bytes.
-  const bits = [];
-  function pushBits(value, count) {
-    for (let i = count - 1; i >= 0; i--) bits.push((value >> i) & 1);
-  }
-  pushBits(QR_MODE_BYTE, 4);
-  pushBits(bytes.length, 8);
-  bytes.forEach(function (b) { pushBits(b, 8); });
-  // Terminator (up to 4 zero bits), then pad to a byte boundary, then pad bytes 0xEC/0x11.
-  for (let i = 0; i < 4 && bits.length < totalDataCodewords * 8; i++) bits.push(0);
-  while (bits.length % 8 !== 0) bits.push(0);
-  const dataCodewordsAll = [];
-  for (let i = 0; i < bits.length; i += 8) {
-    let byte = 0;
-    for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
-    dataCodewordsAll.push(byte);
-  }
-  const padBytes = [0xEC, 0x11];
-  let padIndex = 0;
-  while (dataCodewordsAll.length < totalDataCodewords) {
-    dataCodewordsAll.push(padBytes[padIndex % 2]);
-    padIndex++;
-  }
-
-  // Split into per-block data codewords, RS-encode each block's ECC codewords.
-  const dataBlocks = [];
-  const eccBlocks = [];
-  for (let b = 0; b < block.numBlocks; b++) {
-    const blockData = dataCodewordsAll.slice(b * block.dataPerBlock, (b + 1) * block.dataPerBlock);
-    dataBlocks.push(blockData);
-    eccBlocks.push(_qrRsEncodeBlock_(blockData, block.eccPerBlock, gf));
-  }
-
-  // Interleave: all data codewords round-robin, then all ECC codewords round-robin.
-  const interleaved = [];
-  for (let i = 0; i < block.dataPerBlock; i++) {
-    for (let b = 0; b < block.numBlocks; b++) interleaved.push(dataBlocks[b][i]);
-  }
-  for (let i = 0; i < block.eccPerBlock; i++) {
-    for (let b = 0; b < block.numBlocks; b++) interleaved.push(eccBlocks[b][i]);
-  }
-  return interleaved;
-}
-
-function _qrPlaceFinderPattern_(matrix, reserved, row, col) {
+// --- Finder / timing / alignment patterns -------------------------------------------------
+function _qrPlaceFinderPattern_(matrix, reserved, size, row, col) {
   for (let r = -1; r <= 7; r++) {
+    if (row + r <= -1 || size <= row + r) continue;
     for (let c = -1; c <= 7; c++) {
-      const rr = row + r, cc = col + c;
-      if (rr < 0 || rr >= matrix.length || cc < 0 || cc >= matrix.length) continue;
+      if (col + c <= -1 || size <= col + c) continue;
       const isDark = (r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
         (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
         (r >= 2 && r <= 4 && c >= 2 && c <= 4);
-      matrix[rr][cc] = isDark;
-      reserved[rr][cc] = true;
+      matrix[row + r][col + c] = isDark;
+      reserved[row + r][col + c] = true;
     }
   }
 }
 
-function _qrPlaceAlignmentPattern_(matrix, reserved, row, col) {
-  for (let r = -2; r <= 2; r++) {
-    for (let c = -2; c <= 2; c++) {
-      const rr = row + r, cc = col + c;
-      const isDark = Math.max(Math.abs(r), Math.abs(c)) !== 1;
-      matrix[rr][cc] = isDark;
-      reserved[rr][cc] = true;
+function _qrSetupFinderPatterns_(matrix, reserved, size) {
+  _qrPlaceFinderPattern_(matrix, reserved, size, 0, 0);
+  _qrPlaceFinderPattern_(matrix, reserved, size, 0, size - 7);
+  _qrPlaceFinderPattern_(matrix, reserved, size, size - 7, 0);
+}
+
+function _qrSetupTimingPattern_(matrix, reserved, size) {
+  for (let r = 8; r < size - 8; r++) {
+    const value = r % 2 === 0;
+    matrix[r][6] = value; reserved[r][6] = true;
+    matrix[6][r] = value; reserved[6][r] = true;
+  }
+}
+
+// Row/column coordinates of alignment-pattern centers for this version (symmetric — same
+// list used for both axes), per ISO/IEC 18004 §6.5.2. Version 1 has none.
+function _qrAlignmentRowColCoords_(version) {
+  if (version === 1) return [];
+  const size = _qrSymbolSize_(version);
+  const posCount = Math.floor(version / 7) + 2;
+  const intervals = size === 145 ? 26 : Math.ceil((size - 13) / (2 * posCount - 2)) * 2;
+  const positions = [size - 7];
+  for (let i = 1; i < posCount - 1; i++) positions[i] = positions[i - 1] - intervals;
+  positions.push(6);
+  return positions.reverse();
+}
+
+function _qrSetupAlignmentPattern_(matrix, reserved, size, version) {
+  const coords = _qrAlignmentRowColCoords_(version);
+  for (let i = 0; i < coords.length; i++) {
+    for (let j = 0; j < coords.length; j++) {
+      // Skip the three positions that overlap a finder pattern's corner.
+      if ((i === 0 && j === 0) || (i === 0 && j === coords.length - 1) || (i === coords.length - 1 && j === 0)) continue;
+      const row = coords[i], col = coords[j];
+      for (let r = -2; r <= 2; r++) {
+        for (let c = -2; c <= 2; c++) {
+          const isDark = (r === -2 || r === 2 || c === -2 || c === 2 || (r === 0 && c === 0));
+          matrix[row + r][col + c] = isDark;
+          reserved[row + r][col + c] = true;
+        }
+      }
     }
   }
 }
 
-function _qrPlaceTimingPatterns_(matrix, reserved, size) {
-  for (let i = 8; i < size - 8; i++) {
-    const dark = i % 2 === 0;
-    if (!reserved[6][i]) { matrix[6][i] = dark; reserved[6][i] = true; }
-    if (!reserved[i][6]) { matrix[i][6] = dark; reserved[i][6] = true; }
-  }
-}
-
-// Format info: 5 data bits (2-bit ECC level + 3-bit mask pattern) + 10 BCH error-correction
-// bits (generator G15 = 0x537), XORed with the standard mask 0x5412, per ISO/IEC 18004.
-function _qrFormatInfoBits_(eccLevelBits, maskPattern) {
-  const data = (eccLevelBits << 3) | maskPattern;
+// --- Format info (error-correction level + mask pattern, duplicated twice for redundancy) --
+// 15-bit sequence: 5 data bits (2-bit EC level + 3-bit mask) + 10 BCH error-correction bits
+// (generator G15 = 0b10100110111, 0x537), then XORed with the fixed mask 0x5412 so no
+// combination of level+mask ever produces an all-zero format string.
+function _qrFormatInfoEncodedBits_(levelBit, mask) {
+  const G15 = 0x537;
+  const G15_MASK = 0x5412;
+  const G15_BCH = _qrBCHDigit_(G15);
+  const data = (levelBit << 3) | mask;
   let d = data << 10;
-  const g15 = 0x537;
-  for (let i = 4; i >= 0; i--) {
-    if ((d >> (i + 10)) & 1) d ^= g15 << i;
+  while (_qrBCHDigit_(d) - G15_BCH >= 0) {
+    d ^= (G15 << (_qrBCHDigit_(d) - G15_BCH));
   }
-  return ((data << 10) | d) ^ 0x5412;
+  return ((data << 10) | d) ^ G15_MASK;
 }
 
-function _qrPlaceFormatInfo_(matrix, reserved, size, maskPattern) {
-  // ECC level M = 0b00 per the standard's format-info level bits.
-  const bits = _qrFormatInfoBits_(0, maskPattern);
-  function bit(i) { return (bits >> i) & 1; }
-  // Around the top-left finder pattern.
-  for (let i = 0; i <= 5; i++) { matrix[8][i] = !!bit(i); reserved[8][i] = true; }
-  matrix[8][7] = !!bit(6); reserved[8][7] = true;
-  matrix[8][8] = !!bit(7); reserved[8][8] = true;
-  matrix[7][8] = !!bit(8); reserved[7][8] = true;
-  for (let i = 9; i < 15; i++) { matrix[14 - i][8] = !!bit(i); reserved[14 - i][8] = true; }
-  // Bottom-left (column 8, rows size-1..size-7) and top-right (row 8, cols size-8..size-1).
-  for (let i = 0; i < 8; i++) { matrix[size - 1 - i][8] = !!bit(i); reserved[size - 1 - i][8] = true; }
-  for (let i = 8; i < 15; i++) { matrix[8][size - 15 + i] = !!bit(i); reserved[8][size - 15 + i] = true; }
+// Placement kept line-for-line matched to the reference implementation's exact branch
+// structure (not reorganized) — this exact cell-index mapping is where the previous
+// implementation had a transposition bug, so faithfulness here matters more than tidiness.
+function _qrSetupFormatInfo_(matrix, reserved, size, mask) {
+  const bits = _qrFormatInfoEncodedBits_(QR_EC_LEVEL_M_BIT, mask);
+  for (let i = 0; i < 15; i++) {
+    const mod = ((bits >> i) & 1) === 1;
+
+    // vertical (column 8, near the top-left finder pattern, then down the left edge)
+    if (i < 6) { matrix[i][8] = mod; reserved[i][8] = true; }
+    else if (i < 8) { matrix[i + 1][8] = mod; reserved[i + 1][8] = true; }
+    else { matrix[size - 15 + i][8] = mod; reserved[size - 15 + i][8] = true; }
+
+    // horizontal (row 8, along the top edge, then near the top-left finder pattern)
+    if (i < 8) { matrix[8][size - i - 1] = mod; reserved[8][size - i - 1] = true; }
+    else if (i < 9) { matrix[8][15 - i - 1 + 1] = mod; reserved[8][15 - i - 1 + 1] = true; }
+    else { matrix[8][15 - i - 1] = mod; reserved[8][15 - i - 1] = true; }
+  }
   // The one always-dark module adjacent to the bottom-left finder pattern.
   matrix[size - 8][8] = true; reserved[size - 8][8] = true;
 }
 
-function _qrPlaceData_(matrix, reserved, size, codewords, maskPattern) {
+// --- Data placement (zigzag, unmasked — masking is a separate pass, see _qrApplyMask_) -----
+function _qrSetupData_(matrix, reserved, size, codewords) {
   const bits = [];
-  codewords.forEach(function (byte) {
-    for (let i = 7; i >= 0; i--) bits.push((byte >> i) & 1);
-  });
+  codewords.forEach(function (byte) { for (let i = 7; i >= 0; i--) bits.push((byte >> i) & 1); });
+
+  let inc = -1;
+  let row = size - 1;
   let bitIndex = 0;
-  let col = size - 1;
-  let upward = true;
-  while (col > 0) {
+
+  for (let col = size - 1; col > 0; col -= 2) {
     if (col === 6) col--; // skip the vertical timing-pattern column
-    for (let i = 0; i < size; i++) {
-      const row = upward ? size - 1 - i : i;
+
+    while (true) {
       for (let c = 0; c < 2; c++) {
-        const cc = col - c;
-        if (reserved[row][cc]) continue;
-        let value = bitIndex < bits.length ? bits[bitIndex] : 0;
-        bitIndex++;
-        // Mask pattern 0: (row + col) % 2 === 0 flips the module.
-        if ((row + cc) % 2 === 0) value = value ^ 1;
-        matrix[row][cc] = !!value;
+        if (!reserved[row][col - c]) {
+          const dark = bitIndex < bits.length ? bits[bitIndex] === 1 : false;
+          matrix[row][col - c] = dark;
+          bitIndex++;
+        }
       }
+      row += inc;
+      if (row < 0 || size <= row) { row -= inc; inc = -inc; break; }
     }
-    upward = !upward;
-    col -= 2;
   }
 }
 
-// Public entry point: returns { size, matrix } where matrix[row][col] is true for a dark
-// module, false for light. `text` should already be the exact token string to encode.
-function qrEncode_(text) {
-  const gf = _qrBuildGaloisTables_();
-  const version = _qrSelectVersion_(text.length);
-  const size = _qrModuleCount_(version);
-  const matrix = [];
-  const reserved = [];
-  for (let r = 0; r < size; r++) {
-    matrix.push(new Array(size).fill(false));
-    reserved.push(new Array(size).fill(false));
+// --- Masking ---------------------------------------------------------------------------
+function _qrMaskAt_(pattern, i, j) {
+  switch (pattern) {
+    case 0: return (i + j) % 2 === 0;
+    case 1: return i % 2 === 0;
+    case 2: return j % 3 === 0;
+    case 3: return (i + j) % 3 === 0;
+    case 4: return (Math.floor(i / 2) + Math.floor(j / 3)) % 2 === 0;
+    case 5: return (i * j) % 2 + (i * j) % 3 === 0;
+    case 6: return ((i * j) % 2 + (i * j) % 3) % 2 === 0;
+    case 7: return ((i * j) % 3 + (i + j) % 2) % 2 === 0;
+    default: throw new Error('bad mask pattern: ' + pattern);
+  }
+}
+
+function _qrApplyMask_(pattern, matrix, reserved, size) {
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      if (reserved[row][col]) continue;
+      matrix[row][col] = matrix[row][col] !== _qrMaskAt_(pattern, row, col); // xor
+    }
+  }
+}
+
+// Penalty scoring (ISO/IEC 18004 §6.8.2 rules N1-N4), used only to pick the best of the 8
+// mask patterns — any of the 8 produces a fully valid, decodable QR code; this only improves
+// real-world scan reliability (contrast/pattern-confusion) on cheap phone cameras.
+function _qrPenaltyN1_(matrix, size) {
+  let points = 0;
+  for (let row = 0; row < size; row++) {
+    let sameCountCol = 0, sameCountRow = 0, lastCol = null, lastRow = null;
+    for (let col = 0; col < size; col++) {
+      let m = matrix[row][col];
+      if (m === lastCol) sameCountCol++; else { if (sameCountCol >= 5) points += 3 + (sameCountCol - 5); lastCol = m; sameCountCol = 1; }
+      m = matrix[col][row];
+      if (m === lastRow) sameCountRow++; else { if (sameCountRow >= 5) points += 3 + (sameCountRow - 5); lastRow = m; sameCountRow = 1; }
+    }
+    if (sameCountCol >= 5) points += 3 + (sameCountCol - 5);
+    if (sameCountRow >= 5) points += 3 + (sameCountRow - 5);
+  }
+  return points;
+}
+
+function _qrPenaltyN2_(matrix, size) {
+  let points = 0;
+  for (let row = 0; row < size - 1; row++) {
+    for (let col = 0; col < size - 1; col++) {
+      const dark = [matrix[row][col], matrix[row][col + 1], matrix[row + 1][col], matrix[row + 1][col + 1]]
+        .filter(function (v) { return v; }).length;
+      if (dark === 4 || dark === 0) points++;
+    }
+  }
+  return points * 3;
+}
+
+function _qrPenaltyN3_(matrix, size) {
+  let points = 0;
+  for (let row = 0; row < size; row++) {
+    let bitsCol = 0, bitsRow = 0;
+    for (let col = 0; col < size; col++) {
+      bitsCol = ((bitsCol << 1) & 0x7FF) | (matrix[row][col] ? 1 : 0);
+      if (col >= 10 && (bitsCol === 0x5D0 || bitsCol === 0x05D)) points++;
+      bitsRow = ((bitsRow << 1) & 0x7FF) | (matrix[col][row] ? 1 : 0);
+      if (col >= 10 && (bitsRow === 0x5D0 || bitsRow === 0x05D)) points++;
+    }
+  }
+  return points * 40;
+}
+
+function _qrPenaltyN4_(matrix, size) {
+  let dark = 0;
+  for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) if (matrix[row][col]) dark++;
+  const k = Math.abs(Math.ceil((dark * 100 / (size * size)) / 5) - 10);
+  return k * 10;
+}
+
+function _qrBestMask_(matrix, reserved, size) {
+  let bestPattern = 0, lowestPenalty = Infinity;
+  for (let p = 0; p < 8; p++) {
+    _qrSetupFormatInfo_(matrix, reserved, size, p);
+    _qrApplyMask_(p, matrix, reserved, size);
+    const penalty = _qrPenaltyN1_(matrix, size) + _qrPenaltyN2_(matrix, size) + _qrPenaltyN3_(matrix, size) + _qrPenaltyN4_(matrix, size);
+    _qrApplyMask_(p, matrix, reserved, size); // undo — masking twice with the same pattern is a no-op
+    if (penalty < lowestPenalty) { lowestPenalty = penalty; bestPattern = p; }
+  }
+  return bestPattern;
+}
+
+// --- Codeword construction (mode/length header, data, terminator/padding, Reed-Solomon,
+// block interleaving) --------------------------------------------------------------------
+function _qrBuildCodewords_(text, version, gf) {
+  const bytes = [];
+  for (let i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xFF);
+
+  const buffer = _qrBitBuffer_();
+  buffer.put(QR_MODE_BYTE.bit, 4);
+  buffer.put(bytes.length, _qrCharCountIndicatorBits_(version));
+  bytes.forEach(function (b) { buffer.put(b, 8); });
+
+  const totalCodewords = QR_TOTAL_CODEWORDS[version];
+  const ecTotalCodewords = QR_EC_M[version - 1][1];
+  const dataTotalBits = (totalCodewords - ecTotalCodewords) * 8;
+
+  if (buffer.length + 4 <= dataTotalBits) buffer.put(0, 4); // terminator
+  while (buffer.length % 8 !== 0) buffer.putBit(false); // pad to a byte boundary
+
+  const dataCodewords = buffer.buffer.slice();
+  const padBytes = [0xEC, 0x11];
+  let padIndex = 0;
+  while (dataCodewords.length < (dataTotalBits / 8)) {
+    dataCodewords.push(padBytes[padIndex % 2]);
+    padIndex++;
   }
 
-  _qrPlaceFinderPattern_(matrix, reserved, 0, 0);
-  _qrPlaceFinderPattern_(matrix, reserved, 0, size - 7);
-  _qrPlaceFinderPattern_(matrix, reserved, size - 7, 0);
-  _qrPlaceTimingPatterns_(matrix, reserved, size);
+  // Split into per-block data codewords, Reed-Solomon-encode each, interleave data-then-ECC
+  // round-robin across blocks (ISO/IEC 18004 §6.6) — matters once a version needs >1 block;
+  // for the single-block case this just returns data followed by its ECC codewords.
+  const ecTotalBlocks = QR_EC_M[version - 1][0];
+  const dataTotalCodewords = totalCodewords - ecTotalCodewords;
+  const blocksInGroup2 = totalCodewords % ecTotalBlocks;
+  const blocksInGroup1 = ecTotalBlocks - blocksInGroup2;
+  const dataCodewordsInGroup1 = Math.floor(dataTotalCodewords / ecTotalBlocks);
+  const dataCodewordsInGroup2 = dataCodewordsInGroup1 + 1;
+  const totalCodewordsInGroup1 = Math.floor(totalCodewords / ecTotalBlocks);
+  const ecCount = totalCodewordsInGroup1 - dataCodewordsInGroup1;
 
-  const alignCoords = QR_ALIGNMENT_COORDS[version] || [];
-  alignCoords.forEach(function (r) {
-    alignCoords.forEach(function (c) {
-      if (reserved[r][c]) return; // skip positions overlapping a finder-pattern zone
-      _qrPlaceAlignmentPattern_(matrix, reserved, r, c);
-    });
-  });
+  let offset = 0;
+  const dcBlocks = [], ecBlocks = [];
+  let maxDataSize = 0;
+  for (let b = 0; b < ecTotalBlocks; b++) {
+    const dataSize = b < blocksInGroup1 ? dataCodewordsInGroup1 : dataCodewordsInGroup2;
+    const block = dataCodewords.slice(offset, offset + dataSize);
+    dcBlocks.push(block);
+    ecBlocks.push(_qrReedSolomonEncode_(block, ecCount, gf));
+    offset += dataSize;
+    maxDataSize = Math.max(maxDataSize, dataSize);
+  }
 
-  _qrPlaceFormatInfo_(matrix, reserved, size, 0);
+  const interleaved = [];
+  for (let i = 0; i < maxDataSize; i++) for (let b = 0; b < ecTotalBlocks; b++) if (i < dcBlocks[b].length) interleaved.push(dcBlocks[b][i]);
+  for (let i = 0; i < ecCount; i++) for (let b = 0; b < ecTotalBlocks; b++) interleaved.push(ecBlocks[b][i]);
+  return interleaved;
+}
+
+// Public entry point: returns { size, matrix, version } where matrix[row][col] is true for a
+// dark module, false for light. `text` should already be the exact token string to encode
+// (ASCII — this project's tokens are always hex characters).
+function qrEncode_(text) {
+  const gf = _qrGF_();
+  const version = _qrSelectVersion_(text.length);
+  const size = _qrSymbolSize_(version);
+  const matrix = [], reserved = [];
+  for (let r = 0; r < size; r++) { matrix.push(new Array(size).fill(false)); reserved.push(new Array(size).fill(false)); }
+
+  _qrSetupFinderPatterns_(matrix, reserved, size);
+  _qrSetupTimingPattern_(matrix, reserved, size);
+  _qrSetupAlignmentPattern_(matrix, reserved, size, version);
+  // Reserve the format-info cells now (value irrelevant — real bits written after mask
+  // selection below) so data placement never writes into them.
+  _qrSetupFormatInfo_(matrix, reserved, size, 0);
 
   const codewords = _qrBuildCodewords_(text, version, gf);
-  _qrPlaceData_(matrix, reserved, size, codewords, 0);
+  _qrSetupData_(matrix, reserved, size, codewords);
+
+  const bestMask = _qrBestMask_(matrix, reserved, size);
+  _qrApplyMask_(bestMask, matrix, reserved, size);
+  _qrSetupFormatInfo_(matrix, reserved, size, bestMask); // overwrite placeholder with real bits
 
   return { size: size, matrix: matrix, version: version };
 }

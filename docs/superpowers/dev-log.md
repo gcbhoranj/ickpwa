@@ -360,3 +360,77 @@ packages at the counter, not just Registration.
   another string-matching hack.
 - All 39 tests pass (29 fast + 10 slow), verified against the live deployed Web App
   (`@104`), not just pushed source.
+
+## 2026-08-19 — Post-Phase-5 bug reports: printed-coupon orientation and QR encoding
+
+Two live bug reports from the human, investigated with `superpowers:systematic-debugging`
+(root cause before any fix, in both cases confirmed via live, external evidence — never
+guessed) plus one small feature request.
+
+- **Printed coupons landscape instead of portrait — root cause confirmed, fix blocked on a
+  manual step.** `SlidesApp.create()` (basic service) always produces the 720x405pt default
+  landscape size and has no `setPageSize` method; tried the Advanced Slides Service's
+  `Presentations.create()` (which *documents* a `pageSize` request field) and confirmed live,
+  twice, that it silently ignores the requested size and returns the untouched default
+  anyway; the Slides REST API also has no `batchUpdate` request that resizes an existing
+  presentation. There is genuinely no programmatic fix — reconfirms the original Phase 3
+  finding. `CouponDocuments.gs`'s `_ensureBlankTemplate_` is unchanged; a permanent read-only
+  diagnostic (`system.diagCouponTemplateSizes`) was added so the one-time manual Slides UI
+  resize (File > Page setup > Custom, 8.27"×11.69" A4) can be verified once actually done.
+  Tracing the printed-coupon grid layout math found this bug was very likely *also* the
+  primary cause of the second report below for printed coupons specifically: the 2×5 grid of
+  3"×2" cells is 10in tall, taller than the current wrong 5.625in-tall page, so rows 2+ (any
+  team beyond ~4-5 people) were being clipped out of the exported PDF entirely.
+
+- **QR codes not recognized by any scanner — root cause confirmed, and it was never the
+  scanner.** Chased through several rounds: hardened the Scan screen's camera error handling
+  first (BarcodeDetector existing on `window` doesn't mean detection actually works; the code
+  now surfaces a clear status either way instead of silently doing nothing), then the human
+  reported the *digital* coupon (unaffected by the layout-clipping bug above, since it uses
+  relative positioning) also produced zero response on Android Chrome — the best-case
+  platform for BarcodeDetector — with the camera preview and status line both confirmed
+  working. That ruled out both the printed-coupon clipping theory and a device/browser gap.
+  Final test: dumped `QrEncoder.gs`'s raw matrix via a new diagnostic action
+  (`system.diagQrMatrix`) and fed it to `jsQR` — a real, independent, third-party decoder —
+  through a rendering harness first validated with a known-good reference encoder (a control
+  test: same harness, `qrcode` npm package's output, decoded perfectly). Against that same
+  harness, this project's own encoder's output **did not decode at all**, confirming the QR
+  codes were never actually scannable by anything, on any device — the encoder's own
+  structural test (finder/timing patterns present) never verified real decodability, and the
+  file's own header had flagged exactly this risk since Phase 4 ("not yet verified against a
+  real QR scanner"). Manually diffing against the reference implementation found a concrete,
+  named bug: `_qrPlaceFormatInfo_`'s cell-index mapping had rows and columns transposed for
+  part of the format-info placement versus ISO/IEC 18004 — exactly the kind of
+  easy-to-transcribe-wrong error the original file's own header had worried about in the
+  abstract.
+  - **Fix: full rewrite, not a patch.** Given a hand-rolled attempt had already failed once,
+    patching the specific transposition bug risked missing another one just like it
+    elsewhere. `QrEncoder.gs` is now a faithful, line-for-line-close port of the `qrcode` npm
+    package's core algorithm (MIT licensed, itself based on Kazuhiko Arase's public-domain
+    "QRCode for JavaScript") — same design principles as before (Byte mode, error-correction
+    level M, GF(256) tables computed at runtime not hardcoded, no external network call) but
+    kept structurally close to the verified reference instead of reorganized, and widened
+    from the old versions-1-6-only cap to the full versions-1-40 range (no reason to keep the
+    artificial limit once the algorithm is general). `qrDrawOnSlide_` (the Slides-drawing
+    function) was untouched — only matrix *generation* was ever wrong, not rendering.
+  - **Verified against jsQR before being committed** (not just re-running the existing
+    structural test, which would have passed on the broken version too): three tokens working
+    end-to-end through the live deployed encoder — a short hex token, a real-format 12-char
+    token, and an 86-character token that forces a multi-block (version 5, 2 EC blocks)
+    Reed-Solomon interleaving path — all decoded back to their exact original text.
+  - The structural test's "reject an over-length token" assertion needed updating (199
+    characters no longer exceeds capacity now that versions 7-40 are supported; changed to
+    2501 characters, safely past even version 40's ~2331-byte level-M ceiling).
+  - **Residual risk, explicitly flagged**: existing already-purchased packages' *digital*
+    coupon PDFs still have the old broken QR baked in — `resendCoupon_` deliberately reuses
+    the existing file rather than regenerating it. Confirmed with the human that no real
+    purchases existed yet (test data only), so no regeneration action was needed this round;
+    would need a new "regenerate digital coupon" action if this is ever hit against real data.
+    `Reprint` (printed coupons) *does* regenerate fresh from current code, so printed coupons
+    self-heal once the manual page-size fix above is done.
+
+- **Feature**: purchasing a package now shows a confirmation banner on the Packages screen —
+  "Meal Package No. `<N>` Sold to Team of `<College>`" — `purchasePackage_`'s response gained
+  a `collegeName` field for this; the frontend keeps it across the post-purchase `refresh()`
+  re-render via a closure variable rather than losing it. New `.success`/`--success` CSS
+  token added alongside the existing `.error` pattern.
