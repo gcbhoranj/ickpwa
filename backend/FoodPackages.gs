@@ -147,7 +147,7 @@ function purchasePackage_(actorSession, teamId, includeInchargesInEntitlement, d
 
   return {
     packageId: packageId, packageNumber: packageNumber, couponId: couponId, eligiblePersons: eligiblePersons,
-    amount: amount, startMeal: startDate, endMeal: endDate,
+    amount: amount, startMeal: startDate, endMeal: endDate, collegeName: team.values.CollegeName,
     digitalCouponUrl: digitalPdf.pdfUrl, printedCouponUrl: printedPdf.pdfUrl, emailStatus: emailResult.status,
     digitalCouponFileId: digitalPdf.fileId, printedCouponFileId: printedPdf.fileId
   };

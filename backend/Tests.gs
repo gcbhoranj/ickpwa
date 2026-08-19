@@ -915,6 +915,7 @@ function test_foodPackages_purchaseCreatesEverythingCorrectly() {
     assertEqual_(pkg1.packageNumber, 1, 'first package should be PackageNumber 1');
     assertEqual_(pkg1.eligiblePersons, 2, 'eligiblePersons should be team members only when incharges excluded');
     assertEqual_(pkg1.amount, (rateBreakfast + rateLunch + rateDinner) * 2, 'package amount miscalculated');
+    assertEqual_(pkg1.collegeName, 'Package Test College', 'purchase response should include collegeName for the sold-confirmation message');
     assertEqual_(pkg1.endMeal, _addDays_(pkg1.startMeal, 1), 'endMeal should be exactly one day after startMeal');
     assertTrue_(!!pkg1.digitalCouponFileId, 'digital coupon PDF should have been generated');
     assertTrue_(!!pkg1.printedCouponFileId, 'printed coupon sheet PDF should have been generated');

@@ -4,6 +4,7 @@
 
 async function renderPackagesScreen(root, user, teamId, registrationNumber) {
   root.innerHTML = '<div class="wizard-card"><h1>Food Packages</h1><p>Loading…</p></div>';
+  let soldConfirmation = null; // survives refresh() re-renders; cleared on the next purchase or a manual dismiss
   await refresh();
 
   async function refresh() {
@@ -12,6 +13,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber) {
       '<div class="wizard-card">' +
         '<h1>Food Packages</h1>' +
         '<p class="subtitle">' + registrationNumber + '</p>' +
+        (soldConfirmation ? '<div id="sold-confirmation" class="success">' + soldConfirmation + '</div>' : '') +
         '<div id="packages-error" class="error" style="display:none"></div>' +
         (data.packages.length === 0
           ? '<p>No packages purchased yet.</p>'
@@ -76,12 +78,13 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber) {
       const errEl = document.getElementById('packages-error');
       errEl.style.display = 'none';
       try {
-        await apiCall('registration.package.purchase', {
+        const result = await apiCall('registration.package.purchase', {
           teamId: teamId,
           includeIncharges: document.getElementById('purchase-include-incharges').checked,
           dinnerDate: document.getElementById('purchase-dinner-date').value || null,
           mode: document.getElementById('purchase-mode').value
         });
+        soldConfirmation = 'Meal Package No. ' + result.packageNumber + ' Sold to Team of ' + result.collegeName;
         await refresh();
       } catch (err) {
         errEl.textContent = err.message;

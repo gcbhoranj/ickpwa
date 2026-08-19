@@ -5,6 +5,8 @@
   --card-bg: #ffffff;
   --text: #1a1a1a;
   --error: #b91c1c;
+  --success: #1e7e34;
+  --success-bg: #e6f4ea;
 }
 * { box-sizing: border-box; }
 body {
@@ -30,6 +32,10 @@ button {
 }
 button:hover { background: var(--brand-light); }
 .error { color: var(--error); font-size: 0.85rem; margin: 8px 0; }
+.success {
+  color: var(--success); background: var(--success-bg); font-size: 0.9rem;
+  font-weight: 600; padding: 10px 12px; border-radius: 8px; margin: 8px 0;
+}
 
 table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
