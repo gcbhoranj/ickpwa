@@ -70,33 +70,53 @@ function _buildReceiptLayout_(pres) {
   addLine('Team Members: {{TEAM_MEMBERS}}   Incharges: {{INCHARGES_COUNT}}   Total Contingent: {{TOTAL_CONTINGENT}}', 0.045, 8.5, { left: true });
   y += pageHeight * 0.02;
 
-  const tableHeight = pageHeight * 0.16;
-  const table = slide.insertTable(4, 2, margin, y, contentWidth, tableHeight);
-  // Amounts are short (a few digits) — give Description most of the width so its longest
-  // strings ("Security (refundable, not a charge)") stay on one line instead of wrapping
-  // and growing the row taller than the fixed `tableHeight` reserved below.
-  table.getColumn(0).setWidth(contentWidth * 0.72);
-  table.getColumn(1).setWidth(contentWidth * 0.28);
-  table.getCell(0, 0).getText().setText('Description');
-  table.getCell(0, 1).getText().setText('Amount (Rs)');
-  table.getCell(1, 0).getText().setText('Dari Charges ({{TEAM_MEMBERS}} x Rs {{DARI_RATE}})');
-  table.getCell(1, 1).getText().setText('{{DARI_CHARGES}}');
-  table.getCell(2, 0).getText().setText('Grand Total (charges)');
-  table.getCell(2, 1).getText().setText('{{DARI_CHARGES}}');
-  table.getCell(3, 0).getText().setText('Security (refundable, not a charge)');
-  table.getCell(3, 1).getText().setText('{{SECURITY_AMOUNT}}');
-  for (let r = 0; r < 4; r++) {
-    for (let c = 0; c < 2; c++) {
-      table.getCell(r, c).getText().getTextStyle().setFontSize(8);
-    }
+  // The charges block was originally a SlidesApp.Table, which turned out to be a dead end:
+  // its row height auto-grows to a Slides-enforced minimum well beyond the small height we
+  // requested, but that growth is never reflected back into the script's object model —
+  // Table.getHeight() kept reporting the small requested height, not the real rendered one,
+  // so the next element's y-advance undershot and overlapped the table (confirmed against a
+  // real generated PDF). Table.setColumnWidth()/TableColumn.setWidth() also don't exist on
+  // this API (both threw "is not a function" live). Rather than fight three broken/
+  // unreliable Table APIs, this block is now plain text-box rows using the same `addLine`
+  // mechanics already proven correct for every other line in this layout — no Table
+  // involved, so no auto-grow-vs-measurement mismatch is possible.
+  const amountColWidth = contentWidth * 0.28;
+  const labelColWidth = contentWidth - amountColWidth;
+
+  function addChargeRow(label, amount, opts) {
+    const rowHeightFraction = 0.038;
+    const labelBox = slide.insertTextBox(label, margin, y, labelColWidth, pageHeight * rowHeightFraction);
+    const labelStyle = labelBox.getText().getTextStyle().setFontSize(8.5);
+    if (opts && opts.bold) labelStyle.setBold(true);
+    labelBox.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.START);
+
+    const amountBox = slide.insertTextBox(amount, margin + labelColWidth, y, amountColWidth, pageHeight * rowHeightFraction);
+    const amountStyle = amountBox.getText().getTextStyle().setFontSize(8.5);
+    if (opts && opts.bold) amountStyle.setBold(true);
+    amountBox.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.END);
+
+    y += pageHeight * rowHeightFraction;
   }
-  // Use the table's actual rendered height, not the requested `tableHeight` — Slides can
-  // still auto-grow row height beyond what was requested (e.g. if a cell's text wraps), so
-  // the real table can be taller than requested. Using the requested height here caused
-  // "Total Amount Received" to overlap the table's last row in practice. The extra 0.04
-  // (vs. the previous 0.025) is a defensive margin on top of the measured height, in case
-  // getHeight() is read before Slides has fully committed a very-last-moment row resize.
-  y += table.getHeight() + pageHeight * 0.04;
+
+  const boxTop = y;
+  addChargeRow('Description', 'Amount (Rs)', { bold: true });
+  addChargeRow('Dari Charges ({{TEAM_MEMBERS}} x Rs {{DARI_RATE}})', '{{DARI_CHARGES}}');
+  addChargeRow('Grand Total (charges)', '{{DARI_CHARGES}}');
+  addChargeRow('Security (refundable)', '{{SECURITY_AMOUNT}}');
+  const boxBottom = y;
+
+  // Purely decorative border around the four rows above, drawn last (after the row text
+  // boxes it should be safe to overlap. Transparent fill so it can never visually hide the
+  // text) so the receipt keeps its original boxed/table look without an actual Table.
+  // A couple points of padding above/below so the border doesn't sit right on the first/
+  // last row's text baseline (looked like a strike-through in the first generated PDF).
+  const borderPad = pageHeight * 0.004;
+  const borderRect = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, margin, boxTop - borderPad, contentWidth, (boxBottom - boxTop) + borderPad * 2);
+  borderRect.getFill().setTransparent();
+  borderRect.getBorder().getLineFill().setSolidFill('#999999');
+  borderRect.getBorder().setWeight(0.75);
+
+  y += pageHeight * 0.025;
 
   addLine('Total Amount Received (Mode: {{PAYMENT_MODE}}): Rs {{TOTAL_RECEIVED}}', 0.06, 10, { bold: true, left: true });
   y += pageHeight * 0.02;
