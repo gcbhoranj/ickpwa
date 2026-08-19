@@ -62,7 +62,7 @@ async function renderRoomsScreen(root, user) {
     });
 
     document.getElementById('back-btn').addEventListener('click', function () {
-      renderLanding(root, user);
+      goBack();
     });
   }
 }

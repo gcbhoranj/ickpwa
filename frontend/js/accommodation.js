@@ -59,7 +59,7 @@ async function renderAccommodationDashboard(root, user) {
 
     document.getElementById('logout-btn').addEventListener('click', async function () {
       await logout();
-      renderLogin(root, null);
+      resetNavigation(renderLogin, root, null);
     });
   }
 

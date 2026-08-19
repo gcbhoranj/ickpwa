@@ -10,14 +10,14 @@ function renderRegistrationDashboard(root, user) {
       '<button id="logout-btn">Log Out</button>' +
     '</div>';
   document.getElementById('register-team-btn').addEventListener('click', function () {
-    renderRegisterWizard(root, user);
+    navigateTo(renderRegisterWizard, root, user);
   });
   document.getElementById('view-teams-btn').addEventListener('click', function () {
-    renderTeamsList(root, user);
+    navigateTo(renderTeamsList, root, user);
   });
   document.getElementById('logout-btn').addEventListener('click', async function () {
     await logout();
-    renderLogin(root, null);
+    resetNavigation(renderLogin, root, null);
   });
 }
 
@@ -77,7 +77,7 @@ function renderRegisterWizard(root, user) {
     });
 
     document.getElementById('cancel-btn').addEventListener('click', function () {
-      renderRegistrationDashboard(root, user);
+      goBack();
     });
 
     document.getElementById('team-details-form').addEventListener('submit', async function (e) {
@@ -195,7 +195,7 @@ function renderRegisterWizard(root, user) {
           '<a href="' + receipt.pdfUrl + '" target="_blank" rel="noopener"><button type="button">View / Download Receipt</button></a>' +
           '<button id="done-btn" style="margin-top:12px">Done</button>' +
         '</div>';
-      document.getElementById('done-btn').addEventListener('click', function () { renderRegistrationDashboard(root, user); });
+      document.getElementById('done-btn').addEventListener('click', function () { goBack(); });
     } catch (err) {
       root.innerHTML = '<div class="wizard-card"><h1>Register Team</h1><p class="error">' + err.message + '</p></div>';
     }
@@ -221,9 +221,9 @@ async function renderTeamsList(root, user) {
       '<button id="back-btn">Back</button>' +
     '</div>';
   Array.prototype.forEach.call(document.querySelectorAll('.team-row'), function (row) {
-    row.addEventListener('click', function () { renderTeamDetail(root, user, row.getAttribute('data-teamid')); });
+    row.addEventListener('click', function () { navigateTo(renderTeamDetail, root, user, row.getAttribute('data-teamid')); });
   });
-  document.getElementById('back-btn').addEventListener('click', function () { renderRegistrationDashboard(root, user); });
+  document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
 
 async function renderTeamDetail(root, user, teamId) {
@@ -247,5 +247,5 @@ async function renderTeamDetail(root, user, teamId) {
         : '<p>No receipt generated yet.</p>') +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
-  document.getElementById('back-btn').addEventListener('click', function () { renderTeamsList(root, user); });
+  document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
