@@ -953,8 +953,8 @@ const TEST_CASES = [
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
   { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
-  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly },
-  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint }
+  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, slow: true },
+  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, slow: true }
 ];
 
 function runAllTests_() {

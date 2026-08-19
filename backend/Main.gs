@@ -44,15 +44,15 @@ const ACTIONS = {
   // Since Phase 4, the full test suite no longer reliably completes inside one Apps Script
   // execution (the two PDF-heavy food-package tests alone measured ~130-150s, on top of
   // ~180-195s for everything else — close enough to the 6-minute ceiling to occasionally not
-  // return at all; see dev-log). `payload.only: 'slow'` runs just the tests known to do real
-  // Slides/Drive document generation (currently the food-package ones); omit it to run
+  // return at all; see dev-log). payload.only: 'slow' runs just the tests known to do real
+  // Slides/Drive document generation (flagged 'slow: true' in TEST_CASES); omit it to run
   // everything else. Same AllowSelfTest gate and non-production intent as system.selfTest.
   'system.selfTestSplit': function (payload) {
     if (getSetting_('AllowSelfTest', 'false') !== 'true') {
       throw apiError_('FORBIDDEN', 'Self-test is disabled.');
     }
     const wantSlow = payload && payload.only === 'slow';
-    const cases = TEST_CASES.filter(function (tc) { return (tc.name.indexOf('foodPackages') !== -1) === wantSlow; });
+    const cases = TEST_CASES.filter(function (tc) { return !!tc.slow === wantSlow; });
     const results = cases.map(function (testCase) {
       try {
         testCase.fn();
