@@ -1131,6 +1131,89 @@ function test_mess_resolveByCouponId_lostCouponLookup() {
   }
 }
 
+function test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario() {
+  // Mirrors the human's own example: 13 eligible, served in three visits of 6, 6, 1.
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  const moment = new Date('2026-08-19T14:30:00Z'); // Dinner window
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 13);
+
+    const first = recordMealUsage_(messSession, fixture.qrToken, 6, 'req-1', moment);
+    assertEqual_(first.servedPersons, 6, 'after first claim of 6, served should be 6');
+    assertEqual_(first.remainingPersons, 7, 'after first claim of 6, remaining should be 7');
+
+    const second = recordMealUsage_(messSession, fixture.qrToken, 6, 'req-2', moment);
+    assertEqual_(second.servedPersons, 12, 'after second claim of 6, served should be 12');
+    assertEqual_(second.remainingPersons, 1, 'after second claim of 6, remaining should be 1');
+
+    const third = recordMealUsage_(messSession, fixture.qrToken, 1, 'req-3', moment);
+    assertEqual_(third.servedPersons, 13, 'after third claim of 1, served should be 13');
+    assertEqual_(third.remainingPersons, 0, 'after third claim of 1, remaining should be 0');
+
+    // The scam scenario: a 4th visit claiming any more than the 0 left must be denied.
+    let threwExceeds = false;
+    try {
+      recordMealUsage_(messSession, fixture.qrToken, 1, 'req-4', moment);
+    } catch (err) {
+      threwExceeds = true;
+      assertEqual_(err.code, 'EXCEEDS_REMAINING', 'wrong code for an over-claim');
+      assertTrue_(err.message.indexOf('0') !== -1, 'rejection message should state the actual remaining count');
+    }
+    assertTrue_(threwExceeds, 'a claim exceeding remaining must be rejected, not silently capped');
+
+    const usageRows = findRowsByField_('MEAL_USAGE', 'PackageId', fixture.packageId);
+    assertEqual_(usageRows.length, 3, 'exactly 3 successful claims should have written exactly 3 MEAL_USAGE rows — the rejected 4th writes none');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+function test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  const moment = new Date('2026-08-19T14:30:00Z');
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 10);
+    const first = recordMealUsage_(messSession, fixture.qrToken, 4, 'same-request-id', moment);
+    assertEqual_(first.servedPersons, 4, 'first call should record 4 served');
+
+    const replay = recordMealUsage_(messSession, fixture.qrToken, 4, 'same-request-id', moment);
+    assertEqual_(replay.servedPersons, 4, 'replay of the same requestId should return the original result, not double-serve');
+    assertTrue_(!!replay.replay, 'replay result should be flagged as a replay');
+
+    const usageRows = findRowsByField_('MEAL_USAGE', 'PackageId', fixture.packageId);
+    assertEqual_(usageRows.length, 1, 'a replayed requestId must not write a second MEAL_USAGE row');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+function test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam() {
+  const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 4);
+
+    let threwNoWindow = false;
+    try {
+      recordMealUsage_(messSession, fixture.qrToken, 1, 'req-a', new Date('2026-08-19T10:00:00Z'));
+    } catch (err) { threwNoWindow = true; assertEqual_(err.code, 'NO_ACTIVE_MEAL_WINDOW', 'wrong code'); }
+    assertTrue_(threwNoWindow, 'should reject outside any meal window');
+
+    updateRowById_('TEAMS', 'TeamId', fixture.teamId, { Status: 'LOST' });
+    let threwInactive = false;
+    try {
+      recordMealUsage_(messSession, fixture.qrToken, 1, 'req-b', new Date('2026-08-19T14:30:00Z'));
+    } catch (err) { threwInactive = true; assertEqual_(err.code, 'TEAM_NOT_ACTIVE', 'wrong code'); }
+    assertTrue_(threwInactive, 'should reject a LOST team');
+
+    assertEqual_(findRowsByField_('MEAL_USAGE', 'PackageId', fixture.packageId).length, 0, 'no MEAL_USAGE rows should exist after only rejections');
+  } finally {
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 // Each task appends its own test_xxx function and registers it here.
 const TEST_CASES = [
   { name: 'sheetHelpers_appendFindUpdateDelete', fn: test_sheetHelpers_appendFindUpdateDelete },
@@ -1166,7 +1249,10 @@ const TEST_CASES = [
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
   { name: 'mess_resolveToken_successAndEachRejectionReason', fn: test_mess_resolveToken_successAndEachRejectionReason },
-  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup }
+  { name: 'mess_resolveByCouponId_lostCouponLookup', fn: test_mess_resolveByCouponId_lostCouponLookup },
+  { name: 'mess_recordUsage_fullLifecycleMatchesGroupEntryScenario', fn: test_mess_recordUsage_fullLifecycleMatchesGroupEntryScenario },
+  { name: 'mess_recordUsage_idempotentReplayDoesNotDoubleDecrement', fn: test_mess_recordUsage_idempotentReplayDoesNotDoubleDecrement },
+  { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam }
 ];
 
 function runAllTests_() {

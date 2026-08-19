@@ -115,3 +115,68 @@ function getMessCurrentMealView_(actorSession) {
     orderStatuses: orderStatuses
   };
 }
+
+// The locked check-and-commit — recordUsage's own idempotency (spec §20 point 10, §47/§48):
+// a repeated clientRequestId returns the ORIGINAL result without touching Served/Remaining
+// again, protecting against the frontend's documented retry-on-parse-error behavior
+// (api-client.js) re-submitting the exact same claim.
+function recordMealUsage_(actorSession, qrToken, count, clientRequestId, nowOverride) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.MESS]);
+  if (!qrToken) throw apiError_('VALIDATION_ERROR', 'QR token is required.');
+  const requestedCount = parseInt(count, 10);
+  if (!requestedCount || requestedCount < 1) throw apiError_('VALIDATION_ERROR', 'Count must be at least 1.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (clientRequestId) {
+      const dup = findRowsByField_('MEAL_USAGE', 'ClientRequestId', clientRequestId)[0];
+      if (dup) {
+        return {
+          usageId: dup.UsageId, collegeName: findRowById_('TEAMS', 'TeamId', dup.TeamId).values.CollegeName,
+          packageNumber: Number(findRowById_('FOOD_PACKAGES', 'PackageId', dup.PackageId).values.PackageNumber),
+          meal: dup.Meal, date: dup.Date, eligiblePersons: Number(dup.NewServedTotal) + Number(dup.RemainingAfter),
+          servedPersons: Number(dup.NewServedTotal), remainingPersons: Number(dup.RemainingAfter), replay: true
+        };
+      }
+    }
+
+    const coupon = findRowsByField_('FOOD_COUPONS', 'QrToken', qrToken)[0];
+    if (!coupon) throw apiError_('NOT_FOUND', 'No coupon found for this QR code.');
+    const resolved = _resolveCoupon_(coupon, nowOverride);
+    const remaining = resolved.eligiblePersons - resolved.servedPersons;
+    if (requestedCount > remaining) {
+      throw apiError_('EXCEEDS_REMAINING',
+        'Requested ' + requestedCount + ' exceeds remaining ' + remaining + ' (eligible ' +
+        resolved.eligiblePersons + ', already served ' + resolved.servedPersons + ') for ' + resolved.collegeName + '.');
+    }
+
+    const newServedTotal = resolved.servedPersons + requestedCount;
+    const remainingAfter = resolved.eligiblePersons - newServedTotal;
+    const usageId = nextId_('USG', 7);
+    const now = new Date().toISOString();
+    appendRow_('MEAL_USAGE', {
+      UsageId: usageId, CouponId: resolved.couponId, PackageId: resolved.packageId, TeamId: resolved.teamId,
+      EntitlementId: resolved.entitlementId, Date: resolved.date, Meal: resolved.meal,
+      PreviousServedCount: resolved.servedPersons, ClaimAmount: resolved.rate * requestedCount,
+      NewServedTotal: newServedTotal, RemainingAfter: remainingAfter, MessUser: actorSession.userId,
+      Timestamp: now, ClientRequestId: clientRequestId || ''
+    });
+    updateRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', resolved.entitlementId, {
+      ServedPersons: newServedTotal, RemainingPersons: remainingAfter
+    });
+    appendRow_('AUDIT_LOG', {
+      AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+      Action: 'RECORD_MEAL_USAGE', Entity: 'ENTITLEMENT', EntityId: resolved.entitlementId,
+      PreviousState: String(resolved.servedPersons), NewState: String(newServedTotal)
+    });
+
+    return {
+      usageId: usageId, collegeName: resolved.collegeName, packageNumber: resolved.packageNumber,
+      meal: resolved.meal, date: resolved.date, eligiblePersons: resolved.eligiblePersons,
+      servedPersons: newServedTotal, remainingPersons: remainingAfter
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}

@@ -195,6 +195,10 @@ const ACTIONS = {
   'mess.searchByCouponId': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return resolveMealByCouponId_(session, payload.couponId);
+  },
+  'mess.recordUsage': function (payload, sessionId, requestId) {
+    const session = requireSession_(sessionId);
+    return recordMealUsage_(session, payload.qrToken, payload.count, requestId);
   }
 };
 
@@ -206,7 +210,7 @@ function handleRequest_(e) {
     if (!handler) {
       throw apiError_('UNKNOWN_ACTION', 'No such action: ' + action);
     }
-    const data = handler(body.payload || {}, body.sessionId || null);
+    const data = handler(body.payload || {}, body.sessionId || null, body.requestId || null);
     return jsonOutput_({ ok: true, data: data });
   } catch (err) {
     return jsonOutput_({
