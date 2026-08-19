@@ -434,3 +434,33 @@ guessed) plus one small feature request.
   a `collegeName` field for this; the frontend keeps it across the post-purchase `refresh()`
   re-render via a closure variable rather than losing it. New `.success`/`--success` CSS
   token added alongside the existing `.error` pattern.
+
+## 2026-08-20 — Per-incharge, per-meal food package entitlement
+
+Feature request from the human: incharges mostly stay at a hotel for breakfast/dinner and
+only join mess for lunch, so the single "include incharges" checkbox (applying uniformly to
+all three meals) didn't match reality. Classified bounded (existing flow), short design
+presented and approved in chat, no separate plan doc.
+
+- **New sheet `PACKAGE_INCHARGE_MEALS`**: one row per incharge per package purchase
+  (`IncludeBreakfast`/`IncludeLunch`/`IncludeDinner` booleans), written for every incharge on
+  the team regardless of whether they opted into anything — a complete audit trail of who was
+  asked and what they chose, not just who ended up included.
+- **`purchasePackage_` reworked**: team members stay unconditionally eligible for every meal;
+  each of the three meals' eligible count is now team members + however many incharges
+  checked *that specific meal* — `MEAL_ENTITLEMENTS.EligiblePersons` can genuinely differ
+  across a package's Dinner/Breakfast/Lunch for the first time, and `Amount` is a sum of
+  `rate × that meal's own eligible count` instead of one flat rate-sum × one count. The
+  physical coupon pool (and `FOOD_PACKAGES.EligiblePersons`) is unchanged in meaning — team
+  members + incharges included in *at least one* meal, counted once each — since printed
+  coupons aren't meal-specific.
+- **Frontend**: Team Detail's already-fetched incharges list is threaded straight into the
+  Packages purchase form (no extra API call) — the single checkbox is replaced with a table,
+  one row per incharge, three checkboxes each, all starting unchecked.
+- **Test bucket split again**: adding the new PDF-generating test alongside the existing
+  seven Sheets-heavy Mess fixture tests in one "slow" bucket hit Apps Script's 6-minute
+  ceiling a second time (3 consecutive live failures, not guessed) — the two kinds of
+  "expensive" test don't scale the same way. Replaced the boolean `slow` flag with a `tier`
+  property (`'pdf'` vs `'mess'`, default/omitted = fast) and a matching three-way
+  `payload.only` on `system.selfTestSplit`. 40/40 tests passing across all three tiers (29
+  fast + 7 mess + 4 pdf), verified against the live deployed Web App.
