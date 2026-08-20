@@ -40,7 +40,6 @@ function _packageRowFromPurchaseResult_(result) {
 
 async function renderPackagesScreen(root, user, teamId, registrationNumber, incharges) {
   root.innerHTML = '<div class="wizard-card"><h1>Food Packages</h1><p>Loading…</p></div>';
-  let soldConfirmation = null; // survives refresh() re-renders; cleared on the next purchase or a manual dismiss
   let lastPurchaseResult = null; // see _packageRowFromPurchaseResult_ above
   await refresh();
 
@@ -53,7 +52,6 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
       '<div class="wizard-card">' +
         '<h1>Food Packages</h1>' +
         '<p class="subtitle">' + registrationNumber + '</p>' +
-        (soldConfirmation ? '<div id="sold-confirmation" class="success">' + soldConfirmation + '</div>' : '') +
         '<div id="packages-error" class="error" style="display:none"></div>' +
         (data.packages.length === 0
           ? '<p>No packages purchased yet.</p>'
@@ -170,11 +168,11 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
           dinnerDate: document.getElementById('purchase-dinner-date').value || null,
           mode: modeSelect.value
         });
-        // Confirms who it was sold to, exactly which meals, and how payment was taken, at the
-        // moment of sale — the seller collects payment right here, so this is the on-screen
-        // record of it.
-        soldConfirmation = 'Meal Package No. ' + result.packageNumber + ' Sold to Team of ' + result.collegeName +
-          ' (' + result.mealWindowLabel + ') — Rs ' + result.amount + ' received via ' + modeLabel + '.';
+        // Confirms who it was offered to, exactly which meals, and how payment was taken, at
+        // the moment of sale — the seller collects payment right here, so this is the
+        // on-screen record of it.
+        showToast('Meal Package No. ' + result.packageNumber + ' has been offered to ' + result.collegeName +
+          ' Team (' + result.mealWindowLabel + ') — Rs ' + result.amount + ' received via ' + modeLabel + '.');
         lastPurchaseResult = result;
         await refresh();
       } catch (err) {

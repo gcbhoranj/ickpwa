@@ -1,5 +1,26 @@
 // app.js — page bootstrap: show login, or route to a role-labeled landing/dashboard.
 
+// showToast — one-off confirmation message for a completed transaction (team registered,
+// package sold, etc). Appended to document.body rather than #app-root: every screen change
+// overwrites #app-root's innerHTML wholesale (see navigateTo/navigateReplace above), which
+// would otherwise wipe a toast mid-display the instant the operator moves to the next screen
+// (exactly the bug packages.js used to route around with its own soldConfirmation/
+// lastPurchaseResult-survives-refresh state — no longer needed once the toast lives outside
+// that render cycle). Auto-dismisses; multiple toasts stack if fired in quick succession.
+function showToast(message) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(function () { toast.remove(); }, 5000);
+}
+
 // --- In-app navigation history --------------------------------------------------------
 // Every screen in this app is just a function that overwrites #app-root's innerHTML —
 // there was no browser History API involvement at all, so the physical/hardware back

@@ -38,6 +38,21 @@ button:hover { background: var(--brand-light); }
 }
 
 .hint { color: #777; font-size: 0.75rem; margin-top: 2px; }
+
+/* Toast container: fixed to the viewport (not #app-root), so it survives the screen
+   re-renders that overwrite #app-root's innerHTML on every navigation. */
+#toast-container {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; display: flex; flex-direction: column; gap: 8px;
+  width: calc(100% - 32px); max-width: 480px; pointer-events: none;
+}
+.toast {
+  color: var(--success); background: var(--success-bg); font-size: 0.9rem;
+  font-weight: 600; padding: 12px 16px; border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
 .users-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 600px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
