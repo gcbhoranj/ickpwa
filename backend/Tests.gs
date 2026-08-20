@@ -843,6 +843,129 @@ function test_accommodation_teamMemberAllocation() {
   }
 }
 
+function test_accommodation_vacateAndReallocate() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'w' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  const marker = 'TEST-REALLOC-' + new Date().getTime();
+  let createdTeamId = null;
+  let roomAId = null, roomBId = null;
+  try {
+    const team = registerTeam_(regSession, 'Reallocation Test College', 'District', 4, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    const roomA = createRoom_(adminSession, marker + '-A', 'Hostel A', '1', 4, ROOM_TYPES.TEAM);
+    roomAId = roomA.roomId;
+    const roomB = createRoom_(adminSession, marker + '-B', 'Hostel B', '1', 4, ROOM_TYPES.TEAM);
+    roomBId = roomB.roomId;
+
+    const allocation = allocateRoom_(accSession, createdTeamId, roomAId, 4, ROOM_TYPES.TEAM);
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === roomAId; })[0].remaining, 0, 'room A should be fully allocated');
+
+    const active = listActiveAccommodation_(accSession, ROOM_TYPES.TEAM).filter(function (a) { return a.teamId === createdTeamId; });
+    assertEqual_(active.length, 1, 'listActiveAccommodation_ should show the one active allocation');
+    assertEqual_(active[0].roomId, roomAId, 'listActiveAccommodation_ should report the correct room');
+
+    // Vacate: room A frees up, allocation flips to VACATED, idempotent on repeat.
+    const vacated = vacateRoom_(accSession, allocation.allocationId);
+    assertEqual_(vacated.status, 'VACATED', 'vacateRoom_ should report VACATED');
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === roomAId; })[0].remaining, 4, 'room A should be fully freed after vacating');
+    const vacatedAgain = vacateRoom_(accSession, allocation.allocationId);
+    assertEqual_(vacatedAgain.status, 'VACATED', 'vacating an already-vacated allocation should be a safe no-op, not an error');
+
+    let threwForbidden = false;
+    try { vacateRoom_(regSession, allocation.allocationId); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Accommodation caller'); }
+    assertTrue_(threwForbidden, 'vacateRoom_ did not reject a non-Accommodation caller');
+
+    // Reallocate a fresh allocation from room A into room B, with a duplicate-retry guard.
+    const fresh = allocateRoom_(accSession, createdTeamId, roomAId, 4, ROOM_TYPES.TEAM);
+    const realloc1 = reallocateRoom_(accSession, fresh.allocationId, roomBId, 'realloc-req-1');
+    assertEqual_(realloc1.roomId, roomBId, 'reallocateRoom_ should move the allocation into the new room');
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === roomAId; })[0].remaining, 4, 'old room should be freed after reallocation');
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === roomBId; })[0].remaining, 0, 'new room should now be fully allocated');
+
+    // Retry with the same clientRequestId (simulating the frontend's automatic retry-on-
+    // transient-glitch behavior, api-client.js) must not create a second allocation in room B.
+    const realloc1Replay = reallocateRoom_(accSession, fresh.allocationId, roomBId, 'realloc-req-1');
+    assertEqual_(realloc1Replay.allocationId, realloc1.allocationId, 'a replayed reallocation should return the original result, not create a new one');
+    assertEqual_(listActiveAccommodation_(accSession, ROOM_TYPES.TEAM).filter(function (a) { return a.teamId === createdTeamId; }).length, 1, 'a replayed reallocation must not leave two active allocations for the same team');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('ACCOMMODATION', 'TeamId', createdTeamId).forEach(function (a) { deleteRowById_('ACCOMMODATION', 'AllocationId', a.AllocationId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+    if (roomAId) deleteRowById_('ROOMS', 'RoomId', roomAId);
+    if (roomBId) deleteRowById_('ROOMS', 'RoomId', roomBId);
+  }
+}
+
+function test_accommodation_issueNoc() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let createdTeamId = null;
+  let pdfFileIdToTrash = null;
+  try {
+    const team = registerTeam_(regSession, 'NOC Test College', 'District', 3, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const before = getNocStatus_(accSession, createdTeamId);
+    assertEqual_(before.status, 'PENDING', 'a team with no NOC row yet should report PENDING');
+
+    let threwForbidden = false;
+    try { issueNoc_(regSession, createdTeamId); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Accommodation caller'); }
+    assertTrue_(threwForbidden, 'issueNoc_ did not reject a non-Accommodation caller');
+
+    const granted = issueNoc_(accSession, createdTeamId);
+    pdfFileIdToTrash = granted.pdfFileId;
+    assertEqual_(granted.status, 'NOC_GRANTED', 'issueNoc_ should report NOC_GRANTED');
+    assertTrue_(!!granted.pdfFileId, 'issueNoc_ should generate a real PDF file');
+
+    const after = getNocStatus_(accSession, createdTeamId);
+    assertEqual_(after.status, 'NOC_GRANTED', 'getNocStatus_ should reflect the granted NOC');
+    assertEqual_(after.pdfFileId, granted.pdfFileId, 'getNocStatus_ should surface the same PDF');
+
+    // Idempotent: granting again returns the same certificate, does not regenerate.
+    const regranted = issueNoc_(accSession, createdTeamId);
+    assertEqual_(regranted.pdfFileId, granted.pdfFileId, 'granting an already-granted NOC should return the existing certificate, not a new one');
+    assertEqual_(findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).length, 1, 'exactly one ACCOMMODATION_NOC row should exist even after a repeat grant');
+  } finally {
+    if (pdfFileIdToTrash) DriveApp.getFileById(pdfFileIdToTrash).setTrashed(true);
+    if (createdTeamId) {
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+function test_registration_getTeamDetail_redactsFinancialsForAccommodation() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Accommodation Redaction Test College', 'District', 6, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    calculateCharges_(regSession, createdTeamId, true, true);
+    recordPayment_(regSession, createdTeamId, 'Cash');
+
+    const asAccommodation = getTeamDetail_(accSession, createdTeamId);
+    assertEqual_(asAccommodation.team.TeamId, createdTeamId, 'ACCOMMODATION caller should still see team identity');
+    assertEqual_(asAccommodation.charges, null, 'ACCOMMODATION caller must not see charges');
+    assertEqual_(asAccommodation.payments.length, 0, 'ACCOMMODATION caller must not see payments');
+    assertEqual_(asAccommodation.receipts.length, 0, 'ACCOMMODATION caller must not see receipts');
+
+    const list = listTeams_(accSession);
+    assertTrue_(list.some(function (t) { return t.teamId === createdTeamId; }), 'ACCOMMODATION caller should be able to list teams');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1509,12 +1632,14 @@ const TEST_CASES = [
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
+  { name: 'accommodation_vacateAndReallocate', fn: test_accommodation_vacateAndReallocate },
   { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
   // 'pdf' tier: real Slides/Drive document generation (~30-40s each) — the original reason
   // for a slow bucket at all (Phase 4).
   { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, tier: 'pdf1' },
   { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, tier: 'pdf1' },
   { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
+  { name: 'registration_getTeamDetail_redactsFinancialsForAccommodation', fn: test_registration_getTeamDetail_redactsFinancialsForAccommodation },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
@@ -1535,7 +1660,8 @@ const TEST_CASES = [
   { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam, tier: 'mess' },
   { name: 'foodPackages_perInchargeMealSelections', fn: test_foodPackages_perInchargeMealSelections, tier: 'pdf2' },
   { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf2' },
-  { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' }
+  { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' },
+  { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' }
 ];
 
 function runAllTests_() {

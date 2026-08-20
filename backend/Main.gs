@@ -242,6 +242,30 @@ const ACTIONS = {
   'mess.todaysSummary': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return getTodaysMessSummary_(session);
+  },
+  'accommodation.listActive': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { allocations: listActiveAccommodation_(session, payload.kind) };
+  },
+  'accommodation.vacateRoom': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return vacateRoom_(session, payload.allocationId);
+  },
+  'accommodation.reallocateRoom': function (payload, sessionId, requestId) {
+    const session = requireSession_(sessionId);
+    return reallocateRoom_(session, payload.allocationId, payload.newRoomId, requestId);
+  },
+  'admin.bootstrap.createNocTemplate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createNocTemplate_(session, !!(payload && payload.force));
+  },
+  'accommodation.noc.status': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getNocStatus_(session, payload.teamId);
+  },
+  'accommodation.noc.issue': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return issueNoc_(session, payload.teamId);
   }
 };
 

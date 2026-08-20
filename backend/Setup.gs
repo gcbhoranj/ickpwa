@@ -81,6 +81,7 @@ function setupDriveFolders_() {
     Refunds: _ensureSubfolder_(root, 'Refunds'),
     'Relieving Orders': _ensureSubfolder_(root, 'Relieving Orders'),
     Accommodation: _ensureSubfolder_(root, 'Accommodation'),
+    'Accommodation/NOC Certificates': _ensureSubfolder_(_ensureSubfolder_(root, 'Accommodation'), 'NOC Certificates'),
     Templates: _ensureSubfolder_(root, 'Templates'),
     Assets: _ensureSubfolder_(root, 'Assets'),
     Reports: _ensureSubfolder_(root, 'Reports')
