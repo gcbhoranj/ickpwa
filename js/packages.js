@@ -20,13 +20,35 @@ function _addDaysISO_(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// Builds a listPackages_-shaped row directly from purchasePackage_'s own response — used so
+// a just-bought package is GUARANTEED to appear immediately, without depending on a fresh
+// registration.package.list round trip landing cleanly right after the ~30-40s purchase
+// call finishes (a real reported bug: the new package sometimes didn't show until leaving
+// and re-entering the screen, most likely the same transient Apps Script redirect-not-ready
+// timing this project has hit before, this time on the refresh call rather than the purchase
+// itself). We already have every field we need in `result` — no need to trust a second call.
+function _packageRowFromPurchaseResult_(result) {
+  const included = result.mealsIncluded || {};
+  const mealsLabel = ['dinner', 'breakfast', 'lunch'].filter(function (k) { return included[k]; })
+    .map(function (k) { return k.charAt(0).toUpperCase() + k.slice(1); }).join(' + ');
+  return {
+    packageId: result.packageId, packageNumber: result.packageNumber, eligiblePersons: result.eligiblePersons,
+    amount: result.amount, startMeal: result.startMeal, endMeal: result.endMeal, status: 'ACTIVE', mealsLabel: mealsLabel,
+    digitalCouponUrl: result.digitalCouponUrl, printedCouponUrl: result.printedCouponUrl, emailStatus: result.emailStatus
+  };
+}
+
 async function renderPackagesScreen(root, user, teamId, registrationNumber, incharges) {
   root.innerHTML = '<div class="wizard-card"><h1>Food Packages</h1><p>Loading…</p></div>';
   let soldConfirmation = null; // survives refresh() re-renders; cleared on the next purchase or a manual dismiss
+  let lastPurchaseResult = null; // see _packageRowFromPurchaseResult_ above
   await refresh();
 
   async function refresh() {
     const data = await apiCall('registration.package.list', { teamId: teamId });
+    if (lastPurchaseResult && !data.packages.some(function (p) { return p.packageId === lastPurchaseResult.packageId; })) {
+      data.packages = data.packages.concat([_packageRowFromPurchaseResult_(lastPurchaseResult)]);
+    }
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Food Packages</h1>' +
@@ -153,6 +175,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
         // record of it.
         soldConfirmation = 'Meal Package No. ' + result.packageNumber + ' Sold to Team of ' + result.collegeName +
           ' (' + result.mealWindowLabel + ') — Rs ' + result.amount + ' received via ' + modeLabel + '.';
+        lastPurchaseResult = result;
         await refresh();
       } catch (err) {
         errEl.textContent = err.message;
