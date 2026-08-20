@@ -940,3 +940,62 @@ Principal's too.
 info sync, receipt/relieving visibility, NOC auto-vacate, refund hint), B (transaction toasts),
 C (coupon/Final-Documents email — diagnosed, fixed, and confirmed live-`SENT`), D (NOC decline +
 remarks), E (signatures & seals). Deployed to production Apps Script @142.
+
+## 2026-08-20 — Group F: "Final Receipt / Relieving Order aren't generating" (live report)
+
+Sixth sub-project, from a fresh live report: "at departure processing the app is not generating
+the Final Receipt nor the Relieving Order." Investigated with the systematic-debugging
+discipline (root cause before any fix) using `system.diagEmailLog` (a read-only, no-session
+diagnostic already in `Main.gs`, same convention as Group C's) against the real production
+`EMAIL_LOG` rows rather than guessing. Finding: **document generation itself was never broken**
+— real `RECEIPTS`/`RELIEVING`/`DOCUMENTS` rows and real PDFs already existed in Drive for real
+teams (e.g. `RCT-0078`/`REG-002`). Three separate, real gaps made that invisible from the
+outside, all fixed:
+
+1. **No resend path.** `departure.finalize`'s idempotent fast-path (spec §23, deliberate) never
+   re-attempts the email on a repeat call. A team finalized during Group C's since-resolved
+   Gmail-auth gap (`REG-002`, confirmed via the live diagnostic) has no recovery route in the
+   app at all. New `resendFinalDocuments_`/`departure.resendFinalDocuments` — re-sends the
+   EXISTING PDFs, never regenerates them or touches `SETTLEMENTS` — mirrors
+   `FoodPackages.gs`'s established `resendCoupon_`/`registration.package.resend` pattern
+   exactly. Refactored the finalize path's inline email code into a shared
+   `_sendFinalDocumentsEmail_` so both callers can never drift apart again.
+2. **Every generated PDF was Drive-private.** No file/folder this app creates anywhere has ever
+   called `.setSharing(...)` — confirmed by grepping the whole backend. Team Detail's "View
+   Final Receipt"/"View Relieving Order" links (existing since Group A) pointed straight at
+   those private file IDs, so anyone but the script's own execution identity hit Google's
+   "Request access" page instead of the PDF — indistinguishable, from the Registration
+   Committee's side, from nothing having been generated. Both PDFs now get
+   `setSharing(ANYONE_WITH_LINK, VIEW)` right after creation (view-only, matches how they're
+   already distributed as email attachments) — the same "View" links now actually open, giving
+   in-app preview and print (Drive's own viewer has a print action) with no new UI to build.
+3. **Final Receipt content, per the human partner's explicit direction**: the receipt must show
+   only players' Meal/Dari charges — security is a separate refundable deposit already settled
+   at NOC/departure and must not appear on this document or be netted into its headline figure
+   or `AmountInWords`. `_buildFinalReceiptLayout_` no longer prints Security Collected/Refunded
+   rows; the headline and `AmountInWords` now derive from `preview.netCharges` (Meal+Dari,
+   post-food-refund) instead of `FinalBalance` (which nets in `SecurityRefunded` and
+   `OtherAdjustments`). `SETTLEMENTS.FinalBalance` itself is untouched — still the true total
+   cash returned, kept for internal bookkeeping/reports (`Reports.gs` reads it unchanged).
+
+- **Frontend**: `departure.js`'s Finalize & Send no longer calls `goBack()` blind on success —
+  it renders a confirmation screen with the real email outcome, both "View" links, and a resend
+  form. Team Detail (`registration.js`) gains a "Resend Final Documents" button next to the
+  existing View links (Registration role only, same gate as "Process Departure"), for when an
+  incharge reports non-receipt after the fact rather than mid-workflow.
+- **Testing**: TDD, watched fail live against the real deployed script (this project's
+  established discipline — no mocking for Google services). Three new regression tests, all
+  RED for the expected reason before the fix (`system.selfTestSplit`'s `payload.name` escape
+  hatch, one at a time — `pdf2` real PDF/Slides generations run ~30-40s each):
+  `finalDocuments_pdfsAreLinkShareable` (`PRIVATE` vs expected `ANYONE_WITH_LINK`),
+  `finalDocuments_receiptExcludesSecurityFromContent` (`AmountInWords` was the
+  security-inclusive `"Five Hundred Forty..."`, not the Meal/Dari-only
+  `"Three Hundred Ten..."`), `finalDocuments_resendDoesNotRegenerateAndLogsNewAttempt`
+  (`resendFinalDocuments_` didn't exist). All three green after the fix; regression-checked the
+  two pre-existing `FinalDocuments.gs` tests (`departure_finalizeGeneratesDocumentsAndReliefsTeam`,
+  `finalDocuments_emailFailureCapturesErrorMessage`) plus
+  `registration_getTeamDetail_includesRelievingOrder`, all clean — a full `pdf2`-tier run was
+  also kicked off but ran long enough against the live script to outrun this session's own
+  patience for a single check; spot-checks above stand in for it. Service worker bumped to v30.
+- Deployed to production Apps Script @144 (intermediate @143 was tests-only, deliberately
+  deployed first to capture the live RED before touching implementation).

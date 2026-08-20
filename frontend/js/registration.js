@@ -260,6 +260,12 @@ async function renderTeamDetail(root, user, teamId) {
           (relievingOrder
             ? '<a href="https://drive.google.com/file/d/' + relievingOrder.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button" style="margin-left:8px">View Relieving Order</button></a>'
             : '') +
+          // Only once the departure is actually finalized (both documents exist) -- resending
+          // before that would just 404 (spec: resendFinalDocuments_ throws NOT_FOUND).
+          (finalReceipt && relievingOrder && user.role === 'REGISTRATION'
+            ? '<button type="button" id="resend-final-btn" style="margin-left:8px">Resend Final Documents</button>' +
+              '<div id="resend-final-status" style="margin-top:4px"></div>'
+            : '') +
           // Accommodation's decision (and, if declined, why) — visible here without navigating
           // into Accommodation's own screen or waiting for the Departure screen to surface it.
           (data.nocStatus
@@ -288,6 +294,20 @@ async function renderTeamDetail(root, user, teamId) {
   if (document.getElementById('departure-btn')) {
     document.getElementById('departure-btn').addEventListener('click', function () {
       navigateTo(renderDepartureScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
+    });
+  }
+  if (document.getElementById('resend-final-btn')) {
+    document.getElementById('resend-final-btn').addEventListener('click', async function () {
+      const statusEl = document.getElementById('resend-final-status');
+      statusEl.textContent = 'Sending…';
+      try {
+        const result = await apiCall('departure.resendFinalDocuments', { teamId: teamId, recipientEmails: [] });
+        statusEl.textContent = result.emailStatus === 'SENT'
+          ? 'Resent to: ' + result.recipients.join(', ')
+          : 'Resend attempt status: ' + result.emailStatus;
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
     });
   }
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });

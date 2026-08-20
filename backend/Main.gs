@@ -325,6 +325,10 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return finalizeDepartureAndGenerateDocuments_(session, payload.teamId, payload.otherAdjustments, payload.relievingSession, payload.relievingDate, payload.recipientEmails);
   },
+  'departure.resendFinalDocuments': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resendFinalDocuments_(session, payload.teamId, payload.recipientEmails);
+  },
   'reports.getAll': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return getReportsBundle_(session);

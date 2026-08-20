@@ -103,18 +103,16 @@ function _buildFinalReceiptLayout_(pres, data) {
   addRow('Gross Food Package Charges', data.grossMealCharges);
   addRow('Gross Dari Charges', data.grossDariCharges);
   addRow('Food Refund', data.foodRefund);
-  addRow('Net Charges', data.netCharges);
-  addRow('Security Collected', data.securityCollected);
-  addRow('Security Refunded', data.securityRefunded);
   y += pageHeight * 0.01;
-  addLine('Final Balance (refunded to team): Rs ' + data.finalBalance, 0.045, 10, { bold: true, left: true });
+  addLine('Net Amount for Meal/Dari Charges: Rs ' + data.netCharges, 0.045, 10, { bold: true, left: true });
   y += pageHeight * 0.015;
   addLine('Amount in Words: ' + data.amountInWords, 0.045, 8.5, { left: true });
   y += pageHeight * 0.03;
 
   addLine(
-    'This is the final settlement receipt for this team\'s participation. All food, ' +
-    'accommodation, and security accounts have been settled as recorded above.',
+    'This is the final settlement receipt for this team\'s Meal and Dari (players\') charges only. ' +
+    'The security deposit, if any, has been settled and refunded separately at departure and is ' +
+    'not included in this figure.',
     0.08, 7.5, { left: true }
   );
   y += pageHeight * 0.03;
@@ -171,6 +169,69 @@ function _buildRelievingLayout_(pres, data) {
   _drawSignatureOrLine_(slide, margin + contentWidth * 0.70, y, contentWidth * 0.30, 'Principal\'s Seal', 'PrincipalSealFileId');
 
   return slide;
+}
+
+// Sends (or re-sends) the Final Receipt + Relieving Order PDFs together as attachments.
+// Mirrors FoodPackages.gs's _sendCouponEmail_ exactly (same default-recipients rule, same
+// capture-the-real-error-on-failure fix) so both finalizeDepartureAndGenerateDocuments_ and
+// resendFinalDocuments_ share one code path and can never drift apart again.
+function _sendFinalDocumentsEmail_(actorSession, teamId, receiptId, receiptPdfFileId, relievingPdfFileId, recipientEmails, verb) {
+  let recipients = recipientEmails;
+  if (!recipients || recipients.length === 0) {
+    recipients = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId)
+      .map(function (i) { return i.EmailAddress; }).filter(function (e) { return !!e; });
+  }
+  if (recipients.length === 0) return { status: 'NOT_SENT', recipients: [] };
+
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  const subject = 'Final Documents — ' + (team ? team.values.RegistrationNumber : teamId);
+  const body = 'Please find attached your Final Receipt and Relieving Order' + (verb === 'resent' ? ' (resent).' : '.');
+  let status = 'SENT';
+  let errorMessage = '';
+  try {
+    GmailApp.sendEmail(recipients.join(','), subject, body, {
+      attachments: [DriveApp.getFileById(receiptPdfFileId).getBlob(), DriveApp.getFileById(relievingPdfFileId).getBlob()],
+      name: getSetting_('OrganizerName', '')
+    });
+  } catch (err) {
+    status = 'FAILED';
+    errorMessage = err.message;
+  }
+  appendRow_('EMAIL_LOG', {
+    EmailId: nextId_('EML', 4), DocumentId: receiptId, Recipient: recipients.join(','), Subject: subject,
+    SentAt: new Date().toISOString(), User: actorSession.userId, Status: status, ErrorMessage: errorMessage
+  });
+  return { status: status, recipients: recipients };
+}
+
+// Re-sends the EXISTING Final Receipt + Relieving Order PDFs for an already-finalized
+// departure — never regenerates the PDFs or touches the SETTLEMENTS row. Needed because
+// departure.finalize's fast-path (spec §23, deliberate) never re-attempts the email on a
+// repeat call, so a team finalized while Gmail was mid-authorization-gap (or with a wrong
+// incharge email on file) had no recovery path at all until this action existed. Mirrors
+// FoodPackages.gs's resendCoupon_/registration.package.resend pattern.
+function resendFinalDocuments_(actorSession, teamId, recipientEmails) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  const receiptRow = findRowsByField_('RECEIPTS', 'TeamId', teamId).filter(function (r) { return r.Type === 'FINAL'; })[0];
+  if (!receiptRow) throw apiError_('NOT_FOUND', 'No Final Receipt has been generated for this team yet.');
+  const relievingRow = findRowsByField_('RELIEVING', 'TeamId', teamId)[0];
+  if (!relievingRow) throw apiError_('NOT_FOUND', 'No Relieving Order has been generated for this team yet.');
+
+  const result = _sendFinalDocumentsEmail_(
+    actorSession, teamId, receiptRow.ReceiptId, receiptRow.PdfFileId, relievingRow.PdfFileId, recipientEmails, 'resent'
+  );
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: new Date().toISOString(), UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'RESEND_FINAL_DOCUMENTS', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: result.status
+  });
+  return {
+    teamId: teamId, receiptId: receiptRow.ReceiptId, receiptPdfFileId: receiptRow.PdfFileId,
+    relievingId: relievingRow.RelievingId, relievingPdfFileId: relievingRow.PdfFileId,
+    // `status` for callers that only care about the email outcome (mirrors resendCoupon_'s
+    // return shape); `emailStatus` too so the frontend can treat this and finalize's response
+    // identically (renderFinalizedConfirmation re-renders itself from either).
+    status: result.status, emailStatus: result.status, recipients: result.recipients
+  };
 }
 
 // Mirrors createNocTemplate_ exactly. Left at Slides' default landscape size deliberately —
@@ -258,7 +319,11 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
     const receiptTemplateFile = receiptTemplateIter.next();
     const finalReceiptsFolder = _ensureSubfolder_(_ensureSubfolder_(_getRootFolder_(), 'Registration'), 'Final Receipts');
     const receiptNumber = nextDocumentNumber_('Receipt');
-    const amountInWords = _numberToWordsIndian_(Math.abs(finalBalance));
+    // Meal/Dari (players') charges only — the security deposit is always a separate refundable
+    // transaction (spec §18) and must never be netted into what this receipt shows or spells
+    // out in words, even though SETTLEMENTS.FinalBalance (below) still tracks the true total
+    // cash returned for internal bookkeeping.
+    const amountInWords = _numberToWordsIndian_(Math.abs(preview.netCharges));
 
     const receiptCopy = receiptTemplateFile.makeCopy('Final Receipt - ' + team.values.RegistrationNumber, finalReceiptsFolder);
     const receiptPres = SlidesApp.openById(receiptCopy.getId());
@@ -267,13 +332,16 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
       districtAddress: getSetting_('DistrictAddress', ''), receiptNumber: receiptNumber,
       date: Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd'), registrationNumber: team.values.RegistrationNumber,
       collegeName: team.values.CollegeName, grossMealCharges: preview.grossMealCharges, grossDariCharges: preview.grossDariCharges,
-      foodRefund: preview.foodRefund, netCharges: preview.netCharges, securityCollected: preview.securityCollected,
-      securityRefunded: preview.securityRefunded, finalBalance: finalBalance, amountInWords: amountInWords
+      foodRefund: preview.foodRefund, netCharges: preview.netCharges, amountInWords: amountInWords
     });
     receiptPres.saveAndClose();
     const receiptPdfBlob = DriveApp.getFileById(receiptCopy.getId()).getAs('application/pdf');
     const receiptPdfFile = finalReceiptsFolder.createFile(receiptPdfBlob).setName('Final-Receipt-' + receiptNumber.replace(/\//g, '-') + '.pdf');
     DriveApp.getFileById(receiptCopy.getId()).setTrashed(true);
+    // View-only link sharing — every Drive file this app creates otherwise defaults to
+    // private-to-script-owner, which made the Team Detail "View Final Receipt" link
+    // indistinguishable from the document never having been generated at all for anyone else.
+    receiptPdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     const receiptId = nextId_('RCT', 4);
     appendRow_('RECEIPTS', {
@@ -307,6 +375,7 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
     const relievingPdfBlob = DriveApp.getFileById(relievingCopy.getId()).getAs('application/pdf');
     const relievingPdfFile = relievingFolder.createFile(relievingPdfBlob).setName('Relieving-' + relievingNumber.replace(/\//g, '-') + '.pdf');
     DriveApp.getFileById(relievingCopy.getId()).setTrashed(true);
+    relievingPdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     const relievingId = nextId_('REL', 4);
     appendRow_('RELIEVING', {
@@ -325,30 +394,10 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
     });
 
     // --- Email both PDFs together, release the lock, RELIEVED ---
-    let recipients = recipientEmails;
-    if (!recipients || recipients.length === 0) {
-      recipients = incharges.map(function (i) { return i.EmailAddress; }).filter(function (e) { return !!e; });
-    }
-    let emailStatus = 'NOT_SENT';
-    let emailErrorMessage = '';
-    if (recipients.length > 0) {
-      const subject = 'Final Documents — ' + team.values.RegistrationNumber;
-      const body = 'Please find attached your Final Receipt and Relieving Order.';
-      try {
-        GmailApp.sendEmail(recipients.join(','), subject, body, {
-          attachments: [DriveApp.getFileById(receiptPdfFile.getId()).getBlob(), DriveApp.getFileById(relievingPdfFile.getId()).getBlob()],
-          name: getSetting_('OrganizerName', '')
-        });
-        emailStatus = 'SENT';
-      } catch (err) {
-        emailStatus = 'FAILED';
-        emailErrorMessage = err.message;
-      }
-      appendRow_('EMAIL_LOG', {
-        EmailId: nextId_('EML', 4), DocumentId: receiptId, Recipient: recipients.join(','), Subject: subject,
-        SentAt: nowIso, User: actorSession.userId, Status: emailStatus, ErrorMessage: emailErrorMessage
-      });
-    }
+    const emailResult = _sendFinalDocumentsEmail_(
+      actorSession, teamId, receiptId, receiptPdfFile.getId(), relievingPdfFile.getId(), recipientEmails, 'sent'
+    );
+    const emailStatus = emailResult.status;
 
     updateRowById_('TEAMS', 'TeamId', teamId, {
       Status: 'RELIEVED', DepartureLockedBy: '', DepartureLockedAt: '', UpdatedBy: actorSession.userId, UpdatedAt: nowIso

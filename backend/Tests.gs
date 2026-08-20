@@ -1383,6 +1383,168 @@ function test_finalDocuments_emailFailureCapturesErrorMessage() {
   }
 }
 
+// Regression test for a real production bug (2026-08-20, live UAT report): the Final Receipt
+// is supposed to be the players' Meal/Dari settlement document only — the security deposit is
+// a separate refundable-on-NOC transaction, already handed back before this document is even
+// generated (spec §18: "Security ... always separate from charges"). The old
+// _buildFinalReceiptLayout_ printed Security Collected/Refunded rows and based
+// AmountInWords/the headline figure on FinalBalance (which nets in SecurityRefunded), so the
+// receipt a contingent incharge takes back to their college for financial settlement mixed a
+// refundable deposit into what should be a pure charges-paid figure. SETTLEMENTS.FinalBalance
+// itself is untouched here (still the real total cash returned, used internally) — only what
+// gets printed/derived for the receipt changes. Checks the real generated Slides content
+// directly (no mocking in this project — see file header), not just the DB row.
+function test_finalDocuments_receiptExcludesSecurityFromContent() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  let chargeId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 3);
+    createdTeamId = fixture.teamId;
+    updateRowById_('FOOD_PACKAGES', 'PackageId', fixture.packageId, { Amount: 300 });
+
+    chargeId = nextId_('CHG', 4);
+    appendRow_('CHARGES', {
+      ChargeId: chargeId, TeamId: createdTeamId, RateBreakfastSnapshot: 0, RateLunchSnapshot: 0,
+      RateDinnerSnapshot: 0, RateDariSnapshot: 0, SecurityAmountSnapshot: 500, DariCharges: 50,
+      MealCharges: 0, SecurityCharges: 500, TotalPayable: 550, CalculatedAt: new Date().toISOString(), CreatedBy: regSession.userId
+    });
+
+    initiateDeparture_(regSession, createdTeamId);
+    recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+    recordSecurityRefund_(regSession, createdTeamId, 500);
+
+    // grossCharges = 300 (meal) + 50 (dari) = 350; netCharges = 350 - 40 (food refund) = 310.
+    // Old FinalBalance = 40 (food) + 500 (security) - 0 (adjustments) = 540 -- a materially
+    // different number that must NOT be what the receipt shows or spells out in words.
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+
+    const settlement = findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId)[0];
+    assertEqual_(Number(settlement.SecurityRefunded), 500, 'SETTLEMENTS should still record the real security refund internally');
+    assertEqual_(Number(settlement.FinalBalance), 540, 'SETTLEMENTS.FinalBalance must still be the true total cash returned (unchanged internal bookkeeping)');
+
+    const receiptRow = findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).filter(function (r) { return r.Type === 'FINAL'; })[0];
+    const expectedWords = _numberToWordsIndian_(310);
+    assertEqual_(receiptRow.AmountInWords, expectedWords, 'Final Receipt AmountInWords must reflect Net Charges (Meal+Dari only), not FinalBalance including security');
+    assertTrue_(receiptRow.AmountInWords.indexOf('Five Hundred Forty') === -1, 'receipt words must not accidentally spell out the security-inclusive total');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (chargeId) deleteRowById_('CHARGES', 'ChargeId', chargeId);
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('SECURITY_REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SECURITY_REFUNDS', 'SecurityRefundId', r.SecurityRefundId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+// Regression test for a real production bug (2026-08-20, live UAT report): once a team is
+// finalized, departure.finalize's idempotent fast-path (spec §23) never re-attempts the email
+// -- a team finalized while Gmail auth was broken (a real production case, RCT-0078/REG-002)
+// had no way to ever get its documents delivered. Mirrors FoodPackages.gs's
+// resendCoupon_/registration.package.resend pattern: re-send the EXISTING PDFs, never
+// regenerate them.
+function test_finalDocuments_resendDoesNotRegenerateAndLogsNewAttempt() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 2);
+    createdTeamId = fixture.teamId;
+
+    let threwNotFound = false;
+    try {
+      resendFinalDocuments_(regSession, createdTeamId, ['not-a-real-inbox@example.invalid']);
+    } catch (err) { threwNotFound = true; assertEqual_(err.code, 'NOT_FOUND', 'resend before finalize should report NOT_FOUND'); }
+    assertTrue_(threwNotFound, 'resend must refuse a team with no Final Receipt yet');
+
+    initiateDeparture_(regSession, createdTeamId);
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+
+    const emailLogBefore = findRowsByField_('EMAIL_LOG', 'DocumentId', finalized.receiptId).length;
+    const resend = resendFinalDocuments_(regSession, createdTeamId, ['not-a-real-inbox@example.invalid']);
+    assertTrue_(resend.status === 'SENT' || resend.status === 'FAILED', 'resend should report SENT or FAILED, never throw');
+    assertEqual_(resend.receiptPdfFileId, finalized.receiptPdfFileId, 'resend must reuse the existing Final Receipt PDF, never generate a new one');
+    assertEqual_(resend.relievingPdfFileId, finalized.relievingPdfFileId, 'resend must reuse the existing Relieving Order PDF, never generate a new one');
+
+    const emailLogAfter = findRowsByField_('EMAIL_LOG', 'DocumentId', finalized.receiptId).length;
+    assertEqual_(emailLogAfter, emailLogBefore + 1, 'resend must log exactly one new EMAIL_LOG attempt');
+    assertEqual_(findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).filter(function (r) { return r.Type === 'FINAL'; }).length, 1, 'resend must not create a second FINAL receipt');
+    assertEqual_(findRowsByField_('RELIEVING', 'TeamId', createdTeamId).length, 1, 'resend must not create a second Relieving Order');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+// Regression test for a real production bug (2026-08-20, live UAT report): every Drive
+// folder/file this app creates is private to the script's execution identity -- nothing ever
+// calls .setSharing(...). The Team Detail "View Final Receipt"/"View Relieving Order" links
+// (registration.js) point straight at those file IDs, so anyone who isn't the script owner
+// hits Google's "Request access" page instead of the PDF -- indistinguishable, from the
+// Registration Committee's side, from the document never having been generated at all.
+function test_finalDocuments_pdfsAreLinkShareable() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 2);
+    createdTeamId = fixture.teamId;
+    initiateDeparture_(regSession, createdTeamId);
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+
+    const receiptFile = DriveApp.getFileById(finalized.receiptPdfFileId);
+    const relievingFile = DriveApp.getFileById(finalized.relievingPdfFileId);
+    assertEqual_(receiptFile.getSharingAccess(), DriveApp.Access.ANYONE_WITH_LINK, 'Final Receipt PDF must be viewable by anyone with the link');
+    assertEqual_(receiptFile.getSharingPermission(), DriveApp.Permission.VIEW, 'Final Receipt PDF must be view-only, never editable, via the link');
+    assertEqual_(relievingFile.getSharingAccess(), DriveApp.Access.ANYONE_WITH_LINK, 'Relieving Order PDF must be viewable by anyone with the link');
+    assertEqual_(relievingFile.getSharingPermission(), DriveApp.Permission.VIEW, 'Relieving Order PDF must be view-only, never editable, via the link');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 function test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'y' };
@@ -2348,6 +2510,9 @@ const TEST_CASES = [
   { name: 'accommodation_declineThenReissueNoc', fn: test_accommodation_declineThenReissueNoc, tier: 'pdf2' },
   { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' },
   { name: 'finalDocuments_emailFailureCapturesErrorMessage', fn: test_finalDocuments_emailFailureCapturesErrorMessage, tier: 'pdf2' },
+  { name: 'finalDocuments_receiptExcludesSecurityFromContent', fn: test_finalDocuments_receiptExcludesSecurityFromContent, tier: 'pdf2' },
+  { name: 'finalDocuments_resendDoesNotRegenerateAndLogsNewAttempt', fn: test_finalDocuments_resendDoesNotRegenerateAndLogsNewAttempt, tier: 'pdf2' },
+  { name: 'finalDocuments_pdfsAreLinkShareable', fn: test_finalDocuments_pdfsAreLinkShareable, tier: 'pdf2' },
   // Phase 10: full cross-module lifecycle, 6 real PDF generations — own tier so it never
   // competes with pdf1/pdf2's own budget against the 6-minute ceiling.
   { name: 'e2e_fullTeamLifecycle', fn: test_e2e_fullTeamLifecycle, tier: 'e2e' }
