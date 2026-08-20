@@ -107,13 +107,18 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
             };
           }
         );
+        const modeSelect = document.getElementById('purchase-mode');
+        const modeLabel = modeSelect.options[modeSelect.selectedIndex].text;
         const result = await apiCall('registration.package.purchase', {
           teamId: teamId,
           inchargeMealSelections: inchargeMealSelections,
           dinnerDate: document.getElementById('purchase-dinner-date').value || null,
-          mode: document.getElementById('purchase-mode').value
+          mode: modeSelect.value
         });
-        soldConfirmation = 'Meal Package No. ' + result.packageNumber + ' Sold to Team of ' + result.collegeName;
+        // Confirms both who it was sold to AND how payment was taken, at the moment of sale —
+        // the seller collects payment right here, so this is the on-screen record of it.
+        soldConfirmation = 'Meal Package No. ' + result.packageNumber + ' Sold to Team of ' + result.collegeName +
+          ' — Rs ' + result.amount + ' received via ' + modeLabel + '.';
         await refresh();
       } catch (err) {
         errEl.textContent = err.message;
