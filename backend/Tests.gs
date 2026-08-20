@@ -1216,6 +1216,106 @@ function test_reports_auditLog_scopesToOwnActionsForNonAdmin() {
   }
 }
 
+// Phase 10 (Final QA): one continuous live run through the REAL handlers (not fixture
+// shortcuts) covering every phase in sequence — registration through relieving — the kind of
+// cross-module integration no single phase's own tests exercise together. Real PDF generation
+// happens 6 times (temp receipt, digital coupon, printed coupon sheet, NOC certificate, final
+// receipt, relieving order), so this gets its own 'e2e' tier rather than slowing pdf1/pdf2.
+function test_e2e_fullTeamLifecycle() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'a' };
+  const regSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'r' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'c' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
+
+  const beforeTimings = getMealTimings_(adminSession);
+  let createdTeamId = null;
+  let createdRoomId = null;
+  const trashFileIds = [];
+  const dinnerDate = '2026-09-21';
+  const nextDayDate = '2026-09-22';
+
+  try {
+    updateMealTimings_(adminSession, {
+      breakfastStart: '07:30', breakfastEnd: '09:30', lunchStart: '12:30', lunchEnd: '14:30',
+      dinnerStart: '19:30', dinnerEnd: '21:00', graceMinutes: '10'
+    });
+
+    // 1. Register + charges + payment + temporary receipt (real PDF).
+    const team = registerTeam_(regSession, 'E2E Lifecycle Test College', 'District', 3, [
+      { name: 'E2E Coach', isPrimary: true, needsAccommodation: false }
+    ]);
+    createdTeamId = team.teamId;
+    calculateCharges_(regSession, createdTeamId, true, true);
+    recordPayment_(regSession, createdTeamId, 'Cash');
+    const receipt = generateTemporaryReceipt_(regSession, createdTeamId);
+    trashFileIds.push(receipt.pdfFileId);
+    assertTrue_(!!receipt.pdfFileId, 'temporary receipt should generate a real PDF');
+
+    // 2. Purchase a food package — Dinner + next-day Breakfast + Lunch, real PDFs (digital + printed).
+    const pkg = purchasePackage_(regSession, createdTeamId, null, null, dinnerDate, 'Cash', ['not-a-real-inbox@example.invalid'], 'e2e-purchase-1');
+    trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
+    assertEqual_(pkg.eligiblePersons, 3, 'package should be eligible for the 3 team members (no incharge opted in)');
+    const qrToken = findRowById_('FOOD_PACKAGES', 'PackageId', pkg.packageId).values.QrToken;
+
+    // 3. Mess scans all three meals via the real 10-point-checked recordMealUsage_.
+    const dinnerMoment = new Date('2026-09-21T14:30:00Z'); // 20:00 IST — inside Dinner window
+    const breakfastMoment = new Date('2026-09-22T03:00:00Z'); // 08:30 IST — inside Breakfast window
+    const lunchMoment = new Date('2026-09-22T08:00:00Z'); // 13:30 IST — inside Lunch window
+    assertEqual_(recordMealUsage_(messSession, qrToken, 3, 'e2e-dinner', dinnerMoment).remainingPersons, 0, 'all 3 should be served at Dinner');
+    assertEqual_(recordMealUsage_(messSession, qrToken, 2, 'e2e-breakfast', breakfastMoment).remainingPersons, 1, '2 of 3 served at Breakfast — the 1 unserved becomes the food-refund case below');
+    assertEqual_(recordMealUsage_(messSession, qrToken, 3, 'e2e-lunch', lunchMoment).remainingPersons, 0, 'all 3 served at Lunch');
+
+    // 4. Accommodation: room, allocation, NOC (real PDF).
+    const marker = 'E2E-ROOM-' + new Date().getTime();
+    const room = createRoom_(adminSession, marker, 'E2E Hostel', '1', 3, ROOM_TYPES.TEAM);
+    createdRoomId = room.roomId;
+    assertEqual_(allocateRoom_(accSession, createdTeamId, createdRoomId, 3, ROOM_TYPES.TEAM).personsAllocated, 3, 'all 3 team members should be allocated');
+    const noc = issueNoc_(accSession, createdTeamId);
+    trashFileIds.push(noc.pdfFileId);
+    assertEqual_(noc.status, 'NOC_GRANTED', 'NOC should be granted');
+
+    // 5. Departure: initiate, refund the one un-served Breakfast slot, finalize (2 real PDFs + email, RELIEVED).
+    initiateDeparture_(regSession, createdTeamId);
+    const breakfastEntitlement = findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', createdTeamId).filter(function (e) { return e.Meal === 'BREAKFAST'; })[0];
+    assertEqual_(recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: breakfastEntitlement.EntitlementId, amount: 50 }]).refundIds.length, 1, 'the one un-served breakfast slot should be refunded');
+
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', nextDayDate, ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+    assertEqual_(finalized.alreadyFinalized, false, 'first finalize should generate fresh documents');
+    assertEqual_(findRowById_('TEAMS', 'TeamId', createdTeamId).values.Status, 'RELIEVED', 'team should be RELIEVED at the end of the full lifecycle');
+
+    // 6. Reports reflect the whole lifecycle correctly.
+    const bundle = getReportsBundle_(adminSession);
+    const finalRow = bundle.collegeWiseFinalStatement.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!finalRow, 'the relieved team should appear in the college-wise final statement');
+    assertEqual_(finalRow.foodRefund, 50, 'final statement should reflect the one food refund recorded');
+    const foodReportRow = bundle.food.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertEqual_(foodReportRow.totalServed, 8, 'food report should reflect every meal served (3 dinner + 2 breakfast + 3 lunch)');
+  } finally {
+    updateMealTimings_(adminSession, beforeTimings);
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('REFUNDS', 'RefundId', r.RefundId); });
+      findRowsByField_('SECURITY_REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SECURITY_REFUNDS', 'SecurityRefundId', r.SecurityRefundId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+      findRowsByField_('ACCOMMODATION', 'TeamId', createdTeamId).forEach(function (a) { deleteRowById_('ACCOMMODATION', 'AllocationId', a.AllocationId); });
+      findRowsByField_('MEAL_USAGE', 'TeamId', createdTeamId).forEach(function (u) { deleteRowById_('MEAL_USAGE', 'UsageId', u.UsageId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', createdTeamId).forEach(function (e) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', e.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('FOOD_COUPONS', 'CouponId', c.CouponId); });
+      findRowsByField_('FOOD_PACKAGES', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('FOOD_PACKAGES', 'PackageId', p.PackageId); });
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+    if (createdRoomId) deleteRowById_('ROOMS', 'RoomId', createdRoomId);
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1917,7 +2017,10 @@ const TEST_CASES = [
   { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf2' },
   { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' },
   { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' },
-  { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' }
+  { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' },
+  // Phase 10: full cross-module lifecycle, 6 real PDF generations — own tier so it never
+  // competes with pdf1/pdf2's own budget against the 6-minute ceiling.
+  { name: 'e2e_fullTeamLifecycle', fn: test_e2e_fullTeamLifecycle, tier: 'e2e' }
 ];
 
 function runAllTests_() {
