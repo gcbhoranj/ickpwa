@@ -802,3 +802,27 @@ covers the first, smallest group, approved and built bounded (no spec file).
   signature/seal upload. Also newly noted: the `fast` test tier is now close enough to the
   6-minute ceiling (42 tests) that the next addition to it will likely need the same tier
   rebalance this project has done before (Phase 5's dev-log) — flagged, not fixed here.
+
+## 2026-08-20 — Post-launch feedback, Group B: transaction toasts
+
+Second of the five sub-projects from the same UAT feedback pass (see Group A above). Frontend
+only, no backend changes.
+
+- **New shared `showToast(message)`** (`app.js`) — a fixed-position, auto-dismissing (5s)
+  confirmation banner appended to `document.body` rather than `#app-root`, so it survives the
+  full-innerHTML screen re-renders every navigation does. Styled from the `.success` CSS
+  variables already in `app.css` (Phase 4's inline confirmation used the same palette).
+- **Team registration** now fires `showToast('Team from ' + collegeName + ' is Successfully
+  Registered')` at the true completion point (after the temporary receipt generates — Step 4)
+  — previously no confirmation message existed at all. `renderRegisterWizard`'s state now
+  carries `collegeName` through the wizard to get there.
+- **Package purchase**: `packages.js` already had an ad-hoc version of this (a `.success` div,
+  own wording, plus a `soldConfirmation`/`lastPurchaseResult`-survives-refresh state hack built
+  specifically to keep the message alive across `refresh()`'s re-render). Replaced with the
+  shared toast (message updated to match: "Meal Package No. N has been offered to X Team...",
+  keeping the useful meal-window/amount/payment detail) — the state hack is now unnecessary
+  and removed, since a toast outside `#app-root` doesn't get wiped by `refresh()` in the first
+  place. The purchased package was already guaranteed onto the panel immediately
+  (`_packageRowFromPurchaseResult_`, Phase 4) — untouched.
+- **Testing**: frontend-only, no automated coverage (this project's existing convention) —
+  syntax-checked, diff-reviewed line by line. Service worker bumped to v27.

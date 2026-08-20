@@ -22,7 +22,7 @@ function renderRegistrationDashboard(root, user) {
 }
 
 function renderRegisterWizard(root, user) {
-  const state = { teamId: null, registrationNumber: null, incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }] };
+  const state = { teamId: null, registrationNumber: null, collegeName: null, incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }] };
 
   function renderTeamDetailsStep() {
     root.innerHTML =
@@ -85,14 +85,16 @@ function renderRegisterWizard(root, user) {
       const errEl = document.getElementById('wizard-error');
       errEl.style.display = 'none';
       try {
+        const collegeName = document.getElementById('college-name').value.trim();
         const result = await apiCall('registration.team.create', {
-          collegeName: document.getElementById('college-name').value.trim(),
+          collegeName: collegeName,
           districtName: document.getElementById('district-name').value.trim(),
           numberOfTeamMembers: Number(document.getElementById('team-members').value),
           incharges: state.incharges
         });
         state.teamId = result.teamId;
         state.registrationNumber = result.registrationNumber;
+        state.collegeName = collegeName;
         renderChargesStep();
       } catch (err) {
         errEl.textContent = err.message;
@@ -187,6 +189,7 @@ function renderRegisterWizard(root, user) {
     root.innerHTML = '<div class="wizard-card"><h1>Register Team — Step 4 of 4</h1><p>Generating temporary receipt…</p></div>';
     try {
       const receipt = await apiCall('registration.receipt.generateTemporary', { teamId: state.teamId });
+      showToast('Team from ' + state.collegeName + ' is Successfully Registered');
       root.innerHTML =
         '<div class="wizard-card">' +
           '<h1>Registration Complete</h1>' +
