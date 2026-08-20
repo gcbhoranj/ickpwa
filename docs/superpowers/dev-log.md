@@ -464,3 +464,51 @@ presented and approved in chat, no separate plan doc.
   property (`'pdf'` vs `'mess'`, default/omitted = fast) and a matching three-way
   `payload.only` on `system.selfTestSplit`. 40/40 tests passing across all three tiers (29
   fast + 7 mess + 4 pdf), verified against the live deployed Web App.
+
+## 2026-08-20 — Management feedback batch: duplicate purchases, meal exclusion, payment confirmation
+
+Four items from one management feedback message, triaged and handled separately (one real
+bug via `superpowers:systematic-debugging`, one feature via a short bounded design, one small
+UI addition, one requirement recorded for a not-yet-built future phase).
+
+- **Bug: a package could be sold to the same team more than once.** Root cause (confirmed
+  live, not guessed): `purchasePackage_` had zero idempotency guard and no lock — unlike
+  every other write handler's `ALREADY_CALCULATED`/`ALREADY_PAID`-style pattern — despite
+  `api-client.js`'s documented retry-on-transient-glitch behavior re-sending the exact same
+  request body (same `requestId`) on a Google-side redirect hiccup. Fixed with two
+  independent checks: a `ClientRequestId` replay guard (new `FOOD_PACKAGES` column) that
+  closes the automatic-retry case — a date-only check can't, since the retry's own rolling
+  default-date computation lands on a *different*, non-overlapping date, not the same one —
+  and a genuine-duplicate-sale rejection comparing actual `MEAL_ENTITLEMENTS` (date, meal)
+  slots directly, not `FOOD_PACKAGES`' `StartMeal`/`EndMeal` window. The first attempt at the
+  second check used a naive date-range overlap and immediately broke the *legitimate* rolling
+  case (Package 2's Dinner always lands the same calendar date as Package 1's Breakfast/Lunch
+  by design) — caught live by the existing purchase regression test before shipping, fixed to
+  compare exact (date, meal) tuples instead.
+- **Feature: a package can exclude individual meals.** The scenario driving it: a team
+  registering the morning after arriving too late for the previous night's Dinner should have
+  Package 1 cover only Breakfast+Lunch, not a meal they were never present for. New
+  `mealInclusion: {dinner, breakfast, lunch}` parameter (all default true); an excluded meal
+  gets no `MEAL_ENTITLEMENTS` row at all (clean "not valid" on a scan attempt, not a zeroed
+  row) and contributes nothing to `Amount`. The digital coupon's footer text and
+  `listPackages_`'s new `mealsLabel` field both now describe exactly which meals a package
+  covers, computed from real entitlement rows — a coupon claiming "Dinner" for a package that
+  excludes it would have been actively misleading to the team and to Mess. Frontend:
+  Dinner/Breakfast/Lunch checkboxes (default checked) on the purchase form, with the
+  applicable date next to each updating live as the operator types a Dinner Date (mirroring
+  the backend's own day-add logic client-side, no round trip needed).
+- **UI: the sold-confirmation banner now states amount, payment mode, and which meals** —
+  "Meal Package No. X Sold to Team of `<College>` (Breakfast + Lunch) — Rs Y received via
+  Cash." — since the seller collects payment at the point of sale and this is the on-screen
+  record of it.
+- **Recorded, not built**: the human partner also described a requirement for the (not yet
+  built) Departure/Final-Receipt phase — the final settlement receipt an incharge takes away
+  must reflect only payments made for team members, not for the incharge's own charges, and
+  is generated only after food/security refunds and the relieving order are finalized. Noted
+  here for when that phase is actually scoped; nothing to implement yet since final-receipt
+  generation doesn't exist in the system at all.
+- Test suite growth pattern continued: adding this phase's two new tests pushed `pdf` (now 6
+  tests) past the ceiling a fourth time (3 consecutive live failures). Rather than rebalance
+  again by hand, added `system.selfTestSplit`'s `payload.name` — a permanent way to run one
+  named test regardless of tier, useful both for isolating a single test and for future
+  rebalances — and split `pdf` into `pdf1`/`pdf2`. 42/42 tests passing across five tiers.
