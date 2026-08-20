@@ -769,3 +769,53 @@ generated PDF once granted.
 same way), vacate/reallocate/redacted-team-access are cheap Sheets round trips and join `fast`
 (alongside the existing `rooms_createAndList`/`accommodation_listPendingAndAllocateRoom`); the
 NOC-issuance test does real Slides/Drive PDF generation and joins `pdf2`.
+
+## 22. Phase 7 amendment — Departure lock, food refund, security refund (decided 2026-08-20)
+
+§17's Phase 7 cited "the dinner-ordered logic (§50–§52 of the original prompt)" for meal
+refunds — that source document was never saved into this repo, so the exact formula was
+unrecoverable. Rather than invent a financial rule, this was raised with the human partner
+directly (per §105's binding "do not invent rules"), who clarified: **refund amounts are the
+Mess Committee Convener's discretion, not a fixed formula.** Decided scope, narrower than a
+literal reading of §17 item 7 — no `SETTLEMENTS` row here; "final receipt generated from the
+finalized settlement" (§14) stays Phase 8's job, and Phase 7's own listed scope never mentions
+`SETTLEMENTS` either.
+
+- **Departure lock lifecycle** (`Departure.gs`, spec §6 point 4a): `initiateDeparture_` — a
+  locked check-and-set on `TEAMS.DepartureLockedBy/At`; rejects `DEPARTURE_LOCKED` naming the
+  holder if already held by a different user, idempotent-resume (no error) if the same caller
+  re-initiates. Does not touch `Status` at initiation. `cancelDeparture_` — locking user or
+  Admin only, clears the lock fields; any `REFUNDS`/`SECURITY_REFUNDS` rows already written
+  stay (append-only, same philosophy as every other transactional tab in this system —
+  cancelling means "not finalizing this attempt now," not "undo the money"). `departure.
+  overview_` (read, no lock required) — team, incharges, packages, every `MEAL_ENTITLEMENTS`
+  row for the team (`Eligible`/`Served`/`Remaining`/`MealOrderStatus` shown as reference data
+  only, no formula applied to it), `CHARGES.SecurityCharges`, refunds recorded so far, and
+  `ACCOMMODATION_NOC` status (reusing Phase 6's `getNocStatus_`). `TEAMS.Status` flips to
+  `REFUND_PROCESSING` the first time either refund action below succeeds for a locked team
+  (informational forward signal, idempotent to set again) — `RELIEVED` stays Phase 8-only.
+- **Food refund, manual and per-entitlement**: `recordFoodRefund_(actorSession, teamId,
+  [{entitlementId, amount}])` — the Departure screen shows Eligible/Served/Remaining/
+  MealOrderStatus per entitlement as reference only; the Registration operator (having
+  consulted the Mess Convener off-system) enters the actual refund amount per row they choose
+  to refund, no suggested/calculated value. Writes one `REFUNDS` row per nonzero entry.
+  Guarded to require the caller currently hold this team's departure lock (or be Admin) —
+  matches §6 point 4a's "only reachable through the locking user's in-progress departure
+  flow." Each `EntitlementId` can be refunded at most once — a repeat is rejected
+  (`ALREADY_REFUNDED`), the same double-write-on-retry protection Phase 6 applied to
+  `reallocateRoom_`, since `REFUNDS` is append-only and a second write would double-refund.
+- **Security refund, gated on NOC**: `recordSecurityRefund_(actorSession, teamId, amount)` —
+  requires `ACCOMMODATION_NOC.Status === 'NOC_GRANTED'` for this team (`SECURITY_GATED_ON_NOC`
+  if not) and the caller holding the departure lock (or Admin), same as food refund. Amount is
+  manual entry (the charged `CHARGES.SecurityCharges` is shown as reference, not prefilled —
+  same discretion principle as food refund, since damage deductions etc. are a real
+  possibility the spec never enumerates). At most one `SECURITY_REFUNDS` row per team
+  (`ALREADY_REFUNDED` on a repeat) — matches the schema's single `Ticked` bool per team, not a
+  repeatable ledger.
+- **Role gating, per the spec's own role matrix (§12) — narrower than Phase 6's Teams
+  widening**: all `departure.*` actions are `[ROLES.ADMIN, ROLES.REGISTRATION]` only. MESS and
+  ACCOMMODATION get no access at all here, not even view-only (unlike the Teams-list/detail
+  widening Phase 6 gave them for their own narrower needs).
+- **Frontend**: new `departure.js` — a Departure screen reached from Team Detail (Registration
+  role only) via a new "Process Departure" button, showing the overview above plus the food-
+  refund entry table and the security-refund action once NOC is granted.
