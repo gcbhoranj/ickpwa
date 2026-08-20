@@ -853,3 +853,43 @@ the human partner's own UAT test, which the recent production reset had not yet 
 - **Status at time of writing**: Gmail authorization still not re-granted as of the last check
   — every email send (coupon and Final Documents alike) is still `FAILED`. Needs the human
   partner's one-time consent click-through before this is fully closed.
+- **Resolved same day**: the human partner completed the consent click-through directly in the
+  Apps Script editor (adding a small throwaway `authorizeGmail()` function to trigger it, per
+  this project's own documented process). That editor save clobbered this group's
+  `ErrorMessage`-capture fix and its test in the process (whole-file overwrite, no merge — a
+  real risk worth remembering for any future editor-side edit). Caught via `clasp pull` +
+  diff before assuming anything; reconciled by verifying Gmail actually worked on the clobbered
+  code first (a real live send, `SENT` in `EMAIL_LOG`), then restoring the correct local code
+  (which also removed the now-unneeded `authorizeGmail()`, satisfying the human partner's own
+  "remove after verification" instruction), then re-verifying both the fix and a real send
+  again on the fully-restored code. Confirmed live: coupon and Final Documents emails both
+  reach `SENT` now.
+
+## 2026-08-20 — Post-launch feedback, Group D: NOC decline + remarks
+
+Fourth sub-project. `ACCOMMODATION_NOC.Notes` was reserved since Phase 1 but never populated —
+Status only ever became PENDING/NOC_GRANTED, with no decline path and no remarks anywhere.
+Registration also had zero NOC visibility in the UI at all (Departure's overview showed a bare
+status string, but only once departure was already in progress).
+
+- **New `declineNoc_`** (`Noc.gs`, ACCOMMODATION only) — upserts the same one-row-per-team
+  `ACCOMMODATION_NOC` record `issueNoc_` already does, so a later grant updates it rather than
+  duplicating. Requires non-blank remarks. Refuses (`NOC_ALREADY_GRANTED`) to decline a NOC
+  that's already been granted — reversing a grant would also need to un-vacate the rooms Group
+  A's auto-vacate already freed, a different and riskier operation nobody asked for; decided
+  with the human partner rather than assumed.
+- **`issueNoc_` now clears `Notes` on grant** — a prior decline's remarks no longer linger and
+  read as current once the team is actually cleared. `getNocStatus_` now always returns
+  `notes` (previously omitted the field entirely).
+- **`getTeamDetail_` gains a `nocStatus` field** for Registration/Admin (status + notes +
+  certificate link when granted) — one round trip, matching this project's established
+  "combined read" convention, so Registration sees Accommodation's decision (and, if declined,
+  why) directly on Team Detail without navigating into Accommodation's own screen.
+- **Frontend**: Accommodation's NOC screen gains a remarks textarea + "Decline NOC" button
+  alongside "Grant NOC" (previous decline remarks shown read-only if re-visiting a declined
+  team); Registration's Team Detail gains an "Accommodation NOC: X — remarks" line.
+- **Testing**: TDD, watched fail live — pushed the two new tests alone first (implementation
+  temporarily backed out of the working tree, not just untested) against the live deployed
+  script to get a genuine RED before restoring the implementation, same discipline as every
+  earlier group. Verified green, then regression-checked 5 related existing tests, all clean.
+  Service worker bumped to v28.

@@ -285,6 +285,10 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return issueNoc_(session, payload.teamId);
   },
+  'accommodation.noc.decline': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return declineNoc_(session, payload.teamId, payload.remarks);
+  },
   'departure.initiate': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return initiateDeparture_(session, payload.teamId);

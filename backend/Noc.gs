@@ -82,12 +82,53 @@ function getNocStatus_(actorSession, teamId) {
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
   const row = findRowsByField_('ACCOMMODATION_NOC', 'TeamId', teamId)[0];
-  if (!row) return { teamId: teamId, status: 'PENDING', pdfFileId: null, pdfUrl: null, issuedBy: null, issuedAt: null };
+  if (!row) return { teamId: teamId, status: 'PENDING', pdfFileId: null, pdfUrl: null, issuedBy: null, issuedAt: null, notes: '' };
   return {
     teamId: teamId, status: row.Status, pdfFileId: row.PdfFileId || null,
     pdfUrl: row.PdfFileId ? 'https://drive.google.com/file/d/' + row.PdfFileId + '/view' : null,
-    issuedBy: row.IssuedBy || null, issuedAt: row.IssuedAt || null
+    issuedBy: row.IssuedBy || null, issuedAt: row.IssuedAt || null, notes: row.Notes || ''
   };
+}
+
+// Accommodation's other outcome to issueNoc_'s grant: records why the team isn't cleared yet.
+// Upserts the same one-row-per-team ACCOMMODATION_NOC record issueNoc_ does (so a later grant
+// finds and updates this row rather than creating a duplicate). Blocked once already
+// NOC_GRANTED — reversing a grant is a materially different, riskier operation (it would also
+// need to un-vacate the rooms Noc.gs's grant path already auto-vacates) that nobody has asked
+// for; a mistaken grant needs a human decision, not a same-shape decline call.
+function declineNoc_(actorSession, teamId, remarks) {
+  requireRole_(actorSession, [ROLES.ACCOMMODATION]);
+  if (!remarks || !remarks.trim()) throw apiError_('VALIDATION_ERROR', 'Remarks are required when declining an NOC.');
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
+
+  const existing = findRowsByField_('ACCOMMODATION_NOC', 'TeamId', teamId)[0];
+  if (existing && existing.Status === 'NOC_GRANTED') {
+    throw apiError_('NOC_ALREADY_GRANTED', 'This team\'s NOC has already been granted — declining an already-granted NOC is not supported.');
+  }
+
+  const now = new Date().toISOString();
+  const trimmedRemarks = remarks.trim();
+  let nocId;
+  if (existing) {
+    nocId = existing.NocId;
+    updateRowById_('ACCOMMODATION_NOC', 'NocId', nocId, {
+      Status: 'DECLINED', IssuedBy: actorSession.userId, IssuedAt: now, Notes: trimmedRemarks
+    });
+  } else {
+    nocId = nextId_('NOC', 4);
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nocId, TeamId: teamId, Status: 'DECLINED', IssuedBy: actorSession.userId,
+      IssuedAt: now, Notes: trimmedRemarks, PdfFileId: ''
+    });
+  }
+
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'DECLINE_NOC', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: 'DECLINED'
+  });
+
+  return { nocId: nocId, teamId: teamId, status: 'DECLINED', notes: trimmedRemarks };
 }
 
 // Idempotent by design (see Accommodation.gs's vacateRoom_ comment for the same rationale):
@@ -103,7 +144,7 @@ function issueNoc_(actorSession, teamId) {
   if (existing && existing.Status === 'NOC_GRANTED') {
     return {
       nocId: existing.NocId, teamId: teamId, status: 'NOC_GRANTED', pdfFileId: existing.PdfFileId,
-      pdfUrl: 'https://drive.google.com/file/d/' + existing.PdfFileId + '/view'
+      pdfUrl: 'https://drive.google.com/file/d/' + existing.PdfFileId + '/view', notes: existing.Notes || ''
     };
   }
 
@@ -139,8 +180,10 @@ function issueNoc_(actorSession, teamId) {
   let nocId;
   if (existing) {
     nocId = existing.NocId;
+    // Notes explicitly cleared here — a prior decline's remarks (spec: declineNoc_) shouldn't
+    // linger and read as still-current once the team has actually been granted.
     updateRowById_('ACCOMMODATION_NOC', 'NocId', nocId, {
-      Status: 'NOC_GRANTED', IssuedBy: actorSession.userId, IssuedAt: nowIso, PdfFileId: pdfFile.getId()
+      Status: 'NOC_GRANTED', IssuedBy: actorSession.userId, IssuedAt: nowIso, PdfFileId: pdfFile.getId(), Notes: ''
     });
   } else {
     nocId = nextId_('NOC', 4);
@@ -164,5 +207,5 @@ function issueNoc_(actorSession, teamId) {
     .filter(function (a) { return a.Status === 'ALLOCATED'; })
     .forEach(function (a) { vacateRoom_(actorSession, a.AllocationId); });
 
-  return { nocId: nocId, teamId: teamId, status: 'NOC_GRANTED', pdfFileId: pdfFile.getId(), pdfUrl: 'https://drive.google.com/file/d/' + pdfFile.getId() + '/view' };
+  return { nocId: nocId, teamId: teamId, status: 'NOC_GRANTED', pdfFileId: pdfFile.getId(), pdfUrl: 'https://drive.google.com/file/d/' + pdfFile.getId() + '/view', notes: '' };
 }

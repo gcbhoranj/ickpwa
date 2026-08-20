@@ -148,6 +148,9 @@ function getTeamDetail_(actorSession, teamId) {
     charges: charges.length > 0 ? charges[0] : null,
     payments: findRowsByField_('PAYMENTS', 'TeamId', teamId),
     receipts: findRowsByField_('RECEIPTS', 'TeamId', teamId),
-    relieving: findRowsByField_('RELIEVING', 'TeamId', teamId)
+    relieving: findRowsByField_('RELIEVING', 'TeamId', teamId),
+    // So Registration can see the Accommodation Committee's decision (including decline
+    // remarks) without a second round trip or navigating into Accommodation's own screen.
+    nocStatus: getNocStatus_(actorSession, teamId)
   };
 }

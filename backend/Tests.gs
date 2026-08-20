@@ -629,6 +629,31 @@ function test_registration_getTeamDetail_includesRelievingOrder() {
   }
 }
 
+function test_registration_getTeamDetail_includesNocStatus() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0002', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'NOC Detail Test College', 'District', 4, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const beforeDetail = getTeamDetail_(regSession, createdTeamId);
+    assertEqual_(beforeDetail.nocStatus.status, 'PENDING', 'a team with no NOC row yet should report PENDING to Registration');
+    assertEqual_(beforeDetail.nocStatus.notes, '', 'PENDING should carry no remarks');
+
+    declineNoc_(accSession, createdTeamId, 'Room key not yet returned');
+    const afterDecline = getTeamDetail_(regSession, createdTeamId);
+    assertEqual_(afterDecline.nocStatus.status, 'DECLINED', 'Registration should see the Accommodation Committee\'s decline');
+    assertEqual_(afterDecline.nocStatus.notes, 'Room key not yet returned', 'Registration should see the decline remarks');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 function test_registration_getTeamDetail_redactsFinancialsForMess() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
@@ -1016,6 +1041,56 @@ function test_accommodation_issueNoc_autoVacatesRooms() {
     }
     if (teamRoomId) deleteRowById_('ROOMS', 'RoomId', teamRoomId);
     if (inchargeRoomId) deleteRowById_('ROOMS', 'RoomId', inchargeRoomId);
+  }
+}
+
+function test_accommodation_declineThenReissueNoc() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0002', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let createdTeamId = null;
+  let pdfFileIdToTrash = null;
+  try {
+    const team = registerTeam_(regSession, 'NOC Decline Test College', 'District', 3, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    let threwForbidden = false;
+    try { declineNoc_(regSession, createdTeamId, 'Some reason'); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Accommodation caller'); }
+    assertTrue_(threwForbidden, 'declineNoc_ did not reject a non-Accommodation caller');
+
+    let threwNoRemarks = false;
+    try { declineNoc_(accSession, createdTeamId, '   '); } catch (err) { threwNoRemarks = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for blank remarks'); }
+    assertTrue_(threwNoRemarks, 'declineNoc_ did not require non-blank remarks');
+
+    const declined = declineNoc_(accSession, createdTeamId, 'Room key not yet returned');
+    assertEqual_(declined.status, 'DECLINED', 'declineNoc_ should report DECLINED');
+    assertEqual_(declined.notes, 'Room key not yet returned', 'declineNoc_ should return the recorded remarks');
+    assertEqual_(findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).length, 1, 'exactly one ACCOMMODATION_NOC row should exist after a decline');
+
+    const statusAfterDecline = getNocStatus_(regSession, createdTeamId);
+    assertEqual_(statusAfterDecline.status, 'DECLINED', 'getNocStatus_ should reflect the decline');
+    assertEqual_(statusAfterDecline.notes, 'Room key not yet returned', 'getNocStatus_ should surface the decline remarks');
+
+    // Grant after a decline: same row gets updated (not duplicated), and the stale decline
+    // remarks are cleared since they no longer describe the team's current status.
+    const granted = issueNoc_(accSession, createdTeamId);
+    pdfFileIdToTrash = granted.pdfFileId;
+    assertEqual_(granted.status, 'NOC_GRANTED', 'issueNoc_ should report NOC_GRANTED after a prior decline');
+    assertEqual_(granted.notes, '', 'granting should clear the prior decline remarks');
+    assertEqual_(findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).length, 1, 'granting after a decline should update the same row, not create a second one');
+
+    const statusAfterGrant = getNocStatus_(regSession, createdTeamId);
+    assertEqual_(statusAfterGrant.notes, '', 'getNocStatus_ should no longer show the old decline remarks once granted');
+
+    let threwAlreadyGranted = false;
+    try { declineNoc_(accSession, createdTeamId, 'Too late'); } catch (err) { threwAlreadyGranted = true; assertEqual_(err.code, 'NOC_ALREADY_GRANTED', 'wrong code for declining an already-granted NOC'); }
+    assertTrue_(threwAlreadyGranted, 'declineNoc_ did not reject declining an already-granted NOC');
+  } finally {
+    if (pdfFileIdToTrash) DriveApp.getFileById(pdfFileIdToTrash).setTrashed(true);
+    if (createdTeamId) {
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
   }
 }
 
@@ -2179,6 +2254,7 @@ const TEST_CASES = [
   { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },
   { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag },
   { name: 'registration_getTeamDetail_includesRelievingOrder', fn: test_registration_getTeamDetail_includesRelievingOrder },
+  { name: 'registration_getTeamDetail_includesNocStatus', fn: test_registration_getTeamDetail_includesNocStatus },
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
@@ -2221,6 +2297,7 @@ const TEST_CASES = [
   { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' },
   { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' },
   { name: 'accommodation_issueNoc_autoVacatesRooms', fn: test_accommodation_issueNoc_autoVacatesRooms, tier: 'pdf2' },
+  { name: 'accommodation_declineThenReissueNoc', fn: test_accommodation_declineThenReissueNoc, tier: 'pdf2' },
   { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' },
   { name: 'finalDocuments_emailFailureCapturesErrorMessage', fn: test_finalDocuments_emailFailureCapturesErrorMessage, tier: 'pdf2' },
   // Phase 10: full cross-module lifecycle, 6 real PDF generations — own tier so it never
