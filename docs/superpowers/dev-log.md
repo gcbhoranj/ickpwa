@@ -512,3 +512,53 @@ UI addition, one requirement recorded for a not-yet-built future phase).
   again by hand, added `system.selfTestSplit`'s `payload.name` — a permanent way to run one
   named test regardless of tier, useful both for isolating a single test and for future
   rebalances — and split `pdf` into `pdf1`/`pdf2`. 42/42 tests passing across five tiers.
+
+## 2026-08-20 — Phase 6 (Accommodation): reallocate, vacate, NOC issuance
+
+Closes out the scope Phase 3.5 deliberately narrowed to allocate-only (§19). Short design
+recorded as spec §21 (decided with the human partner: allocation stays per-team/per-incharge,
+not per-team-member — YAGNI, nothing so far has needed individual student-level tracking; NOC
+issuance is both the schema's `PENDING`/`NOC_GRANTED` status flip and a generated PDF
+certificate), then a lean implementation plan
+(`docs/superpowers/plans/2026-08-20-phase-6-accommodation.md`), executed inline task-by-task.
+
+- **`Accommodation.gs` gains `vacateRoom_`/`reallocateRoom_`/`listActiveAccommodation_`**
+  alongside the existing `allocateRoom_`. Idempotency decided per-action by actual risk, not
+  applied uniformly: `vacateRoom_` is naturally idempotent (capacity is always summed live
+  from currently-`ALLOCATED` rows, so flipping an already-`VACATED` row again is a harmless
+  no-op — no `ClientRequestId` needed). `reallocateRoom_` creates a **new** allocation row
+  (composed as vacate + allocate under one lock), so it genuinely risks the same
+  double-write-on-retry bug class the 2026-08-20 duplicate-purchase fix addressed for
+  `FOOD_PACKAGES` — given a `ClientRequestId` guard (new `ACCOMMODATION` column) proactively,
+  rather than waiting to rediscover the bug live.
+- **New `Noc.gs`**: `ACCOMMODATION_NOC` (spec §5, reserved since Phase 1, never populated
+  until now) gets `getNocStatus_`/`issueNoc_`/`createNocTemplate_`. Certificate generation
+  reuses `Receipts.gs`'s Slides-copy-and-render pattern exactly (`_ensureSubfolder_`,
+  `_getRootFolder_`, `_clearSlide_`), stored under a new `Accommodation/NOC Certificates`
+  Drive subfolder, numbered via `nextDocumentNumber_('Accommodation')` (the
+  `Numbering_Accommodation_*` settings had been seeded since Phase 1 but never consumed).
+  `issueNoc_` is idempotent by finds-or-creates-the-one-row design — granting an
+  already-`NOC_GRANTED` team returns the existing certificate rather than regenerating or
+  erroring; no `ClientRequestId` needed since there's no financial harm in a repeat grant,
+  unlike a package purchase. The certificate wording deliberately doesn't assert the rooms
+  have been physically vacated, since Phase 6 issues NOC independent of the not-yet-built
+  departure workflow.
+- **`Registration.gs`'s `listTeams_`/`getTeamDetail_` widened to `ACCOMMODATION`**, with the
+  same charges/payments/receipts redaction Phase 5 gave `MESS` — Accommodation needed a way to
+  search/select a team to grant its NOC, reusing the shared Teams/Team-Detail screens exactly
+  as Phase 5 did for Mess rather than building a parallel search screen.
+- **Frontend**: `accommodation.js`'s dashboard gains active-allocation sections (Reallocate/
+  Vacate buttons) alongside the existing pending-allocation sections, plus a Teams nav button;
+  a new `renderNocScreen` (reached from Team Detail's new "Accommodation NOC" button, ACCOMMODATION-only) shows status and a Grant NOC action with a link to the generated PDF once
+  granted. `registration.js`'s `renderTeamDetail` hides the Packages button and extends its
+  charges-redaction condition for the ACCOMMODATION role. Service worker bumped to v21.
+- **Verified live against the real deployed backend** (a fresh versioned deploy was required
+  mid-task — this deployment is pinned by version, not `@HEAD`, so `clasp push` alone doesn't
+  reach the live Web App URL, only `clasp deploy -i <id>` does): `fast` tier 29/31 (2 failures
+  pre-existing/environmental, both in `calculateCharges_`/receipt tests this phase never
+  touched — matches the dev-log's own prior note about live-Sheet test-data pollution), `mess`
+  tier 7/7, `pdf1` tier 3/3 (one transient `Service Spreadsheets failed` Google-edge error,
+  passed clean on retry — the same known flakiness class documented earlier in this log),
+  `pdf2` tier 4/4 including the new `accommodation_issueNoc` test. One-time Admin setup
+  (`admin.bootstrap.setupSchema`/`setupDriveFolders`/`createNocTemplate`) run against the live
+  production Sheet with real Admin credentials supplied by the human partner.
