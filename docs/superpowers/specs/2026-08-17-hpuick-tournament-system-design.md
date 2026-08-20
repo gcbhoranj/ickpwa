@@ -764,6 +764,8 @@ Vacate buttons. New **NOC** screen (completing the spec's 3-screen Accommodation
 search/list teams with their current NOC status, a Grant NOC action, and a link to the
 generated PDF once granted.
 
-**Testing:** new `accom` self-test tier (matching the `mess`/`pdf1`/`pdf2` tier-split
-pattern established in Phase 5) — live vacate, reallocate, and NOC-issuance-with-PDF flows
-against the real deployed backend.
+**Testing:** no new tier needed — per the cost-based rationale that created the `mess`/`pdf1`/
+`pdf2` split in the first place (Sheets-only work and real document generation don't scale the
+same way), vacate/reallocate/redacted-team-access are cheap Sheets round trips and join `fast`
+(alongside the existing `rooms_createAndList`/`accommodation_listPendingAndAllocateRoom`); the
+NOC-issuance test does real Slides/Drive PDF generation and joins `pdf2`.
