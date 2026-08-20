@@ -1,7 +1,9 @@
 // mess.js — Mess Committee panel (Phase 5). Current Meal (order-status control), Scan
 // (Task 7), Today's Summary, and Teams (reuses registration.js's renderTeamsList/
 // renderTeamDetail + packages.js's renderPackagesScreen — no separate Mess-specific team
-// screens needed, spec §20's package-sales parity).
+// screens needed, spec §20's package-sales parity). renderFoodRefundScreen (correction
+// 2026-08-20) is the one Mess-specific team screen: refund authority for unused meal coupons
+// belongs to Mess, not Registration, reached from Team Detail's "Food Refund" button.
 
 async function renderMessDashboard(root, user) {
   root.innerHTML =
@@ -237,4 +239,63 @@ async function renderScanScreen(root, user) {
   }
 
   renderIdle(null);
+}
+
+// Correction 2026-08-20: refund amounts for unused meal coupons are the Mess Committee's
+// discretion (spec §22), so Mess needs its own place to enter them — mirrors the entry form
+// that used to live on Registration's Departure screen, now backed by the narrower
+// mess.foodRefund.overview read and gated server-side to MESS/ADMIN (recordFoodRefund_).
+async function renderFoodRefundScreen(root, user, teamId, registrationNumber, collegeName) {
+  root.innerHTML = '<div class="wizard-card"><h1>Food Refund</h1><p>Loading…</p></div>';
+  let overview = await apiCall('mess.foodRefund.overview', { teamId: teamId });
+  render();
+
+  function render() {
+    if (!overview.departureLockedBy) {
+      root.innerHTML =
+        '<div class="wizard-card">' +
+          '<h1>Food Refund</h1>' +
+          '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + '</p>' +
+          '<p>Registration has not initiated departure for this team yet — food refund cannot be recorded until it is.</p>' +
+          '<button id="back-btn">Back</button>' +
+        '</div>';
+      document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
+      return;
+    }
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Food Refund</h1>' +
+        '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + '</p>' +
+        '<div id="food-refund-error" class="error" style="display:none"></div>' +
+        '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Refund Amount</th></tr></thead><tbody>' +
+          overview.entitlements.map(function (e) {
+            return '<tr><td>' + e.date + '</td><td>' + e.meal + '</td><td>' + e.eligiblePersons + '</td><td>' + e.servedPersons + '</td><td>' + e.remainingPersons + '</td><td>' + e.mealOrderStatus + '</td>' +
+              '<td>' + (e.alreadyRefunded ? 'Refunded' :
+                '<input type="number" min="0" class="food-refund-input" data-entid="' + e.entitlementId + '" value="0">' +
+                (e.suggestedRefund > 0 ? '<div class="hint">Unused: ' + e.remainingPersons + ' &times; Rs ' + e.rate + ' = Rs ' + e.suggestedRefund + '</div>' : '')
+              ) + '</td></tr>';
+          }).join('') +
+        '</tbody></table>' +
+        '<button id="submit-food-refund-btn" style="margin-top:8px">Record Food Refund</button>' +
+        '<button id="back-btn" style="margin-top:12px">Back</button>' +
+      '</div>';
+
+    document.getElementById('submit-food-refund-btn').addEventListener('click', async function () {
+      const errEl = document.getElementById('food-refund-error');
+      errEl.style.display = 'none';
+      const entries = Array.prototype.map.call(document.querySelectorAll('.food-refund-input'), function (input) {
+        return { entitlementId: input.getAttribute('data-entid'), amount: Number(input.value) };
+      }).filter(function (e) { return e.amount > 0; });
+      if (entries.length === 0) return;
+      try {
+        await apiCall('departure.recordFoodRefund', { teamId: teamId, entries: entries });
+        overview = await apiCall('mess.foodRefund.overview', { teamId: teamId });
+        render();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+    document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
+  }
 }

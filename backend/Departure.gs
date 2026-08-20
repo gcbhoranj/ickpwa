@@ -3,11 +3,21 @@
 // No SETTLEMENTS row here — that's Phase 8's job (final receipt generation).
 
 function _requireDepartureLockHeldByCaller_(actorSession, team) {
-  if (!team.values.DepartureLockedBy) {
-    throw apiError_('DEPARTURE_NOT_INITIATED', 'Departure has not been initiated for this team yet.');
-  }
+  _requireDepartureInitiated_(team);
   if (team.values.DepartureLockedBy !== actorSession.userId && actorSession.role !== ROLES.ADMIN) {
     throw apiError_('DEPARTURE_LOCKED', 'Departure processing is already in progress by ' + team.values.DepartureLockedBy + '.');
+  }
+}
+
+// Weaker than _requireDepartureLockHeldByCaller_ -- just "departure is underway", not "you're
+// the one who started it." Used by recordFoodRefund_: the Mess Committee (spec correction
+// 2026-08-20 -- refund authority is Mess's, not Registration's) never calls
+// initiateDeparture_, so it can never satisfy the same-locking-user check, but the refund
+// should still only be enterable once Registration has actually started that team's
+// departure.
+function _requireDepartureInitiated_(team) {
+  if (!team.values.DepartureLockedBy) {
+    throw apiError_('DEPARTURE_NOT_INITIATED', 'Departure has not been initiated for this team yet.');
   }
 }
 
@@ -61,13 +71,36 @@ function cancelDeparture_(actorSession, teamId) {
   }
 }
 
+// Shared by getDepartureOverview_ (Registration/Admin) and getFoodRefundOverview_ (Mess/Admin)
+// so the Eligible/Served/Remaining/suggestedRefund view can never drift between the two roles
+// who both need to look at the same entitlement rows.
+function _mapEntitlementsForOverview_(teamId) {
+  const refunds = findRowsByField_('REFUNDS', 'TeamId', teamId);
+  const refundedEntitlementIds = {};
+  refunds.forEach(function (r) { refundedEntitlementIds[r.EntitlementId] = true; });
+  const entitlements = findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', teamId).map(function (e) {
+    const alreadyRefunded = !!refundedEntitlementIds[e.EntitlementId];
+    return {
+      entitlementId: e.EntitlementId, meal: e.Meal, date: e.Date, rate: Number(e.Rate),
+      eligiblePersons: Number(e.EligiblePersons), servedPersons: Number(e.ServedPersons),
+      remainingPersons: Number(e.RemainingPersons), mealOrderStatus: e.MealOrderStatus,
+      alreadyRefunded: alreadyRefunded,
+      // A hint only, never written anywhere or auto-applied — refund amount stays the Mess
+      // Convener's manual judgment call per the Phase 7 decision (spec §22, authority
+      // corrected 2026-08-20 to actually match that decision — see recordFoodRefund_). Lets
+      // the operator see what "fully unused" would amount to instead of guessing from the raw
+      // Eligible/Served/Remaining columns.
+      suggestedRefund: alreadyRefunded ? 0 : Number(e.RemainingPersons) * Number(e.Rate)
+    };
+  });
+  return { entitlements: entitlements, refunds: refunds };
+}
+
 function getDepartureOverview_(actorSession, teamId) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
-  const refunds = findRowsByField_('REFUNDS', 'TeamId', teamId);
-  const refundedEntitlementIds = {};
-  refunds.forEach(function (r) { refundedEntitlementIds[r.EntitlementId] = true; });
+  const mapped = _mapEntitlementsForOverview_(teamId);
   const charges = findRowsByField_('CHARGES', 'TeamId', teamId)[0] || null;
   const nocStatus = getNocStatus_(actorSession, teamId);
 
@@ -75,27 +108,46 @@ function getDepartureOverview_(actorSession, teamId) {
     team: team.values,
     incharges: findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId),
     packages: findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId),
-    entitlements: findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', teamId).map(function (e) {
-      const alreadyRefunded = !!refundedEntitlementIds[e.EntitlementId];
-      return {
-        entitlementId: e.EntitlementId, meal: e.Meal, date: e.Date, rate: Number(e.Rate),
-        eligiblePersons: Number(e.EligiblePersons), servedPersons: Number(e.ServedPersons),
-        remainingPersons: Number(e.RemainingPersons), mealOrderStatus: e.MealOrderStatus,
-        alreadyRefunded: alreadyRefunded,
-        // A hint only, never written anywhere or auto-applied — refund amount stays the
-        // Convener's manual judgment call per the Phase 7 decision (spec §22). Lets the
-        // operator see what "fully unused" would amount to instead of guessing from the raw
-        // Eligible/Served/Remaining columns.
-        suggestedRefund: alreadyRefunded ? 0 : Number(e.RemainingPersons) * Number(e.Rate)
-      };
-    }),
+    entitlements: mapped.entitlements,
     securityCharged: charges ? Number(charges.SecurityCharges) : 0,
-    refunds: refunds,
+    refunds: mapped.refunds,
     securityRefunds: findRowsByField_('SECURITY_REFUNDS', 'TeamId', teamId),
     nocStatus: nocStatus.status,
     departureLockedBy: team.values.DepartureLockedBy || null,
     settlementPreview: _computeSettlementPreview_(teamId)
   };
+}
+
+// Mess Committee's own read path to the entitlement/refund data they now act on (correction
+// 2026-08-20 — see recordFoodRefund_). Deliberately narrower than getDepartureOverview_: no
+// charges/security/settlement preview, matching the redaction philosophy already established
+// for MESS in getTeamDetail_ (spec §20/§21) — Mess needs Eligible/Served/Remaining and
+// what's already been refunded, nothing about money it has no say over.
+function getFoodRefundOverview_(actorSession, teamId) {
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.MESS]);
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
+  if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
+  const mapped = _mapEntitlementsForOverview_(teamId);
+
+  return {
+    team: { TeamId: team.values.TeamId, RegistrationNumber: team.values.RegistrationNumber, CollegeName: team.values.CollegeName, Status: team.values.Status },
+    departureLockedBy: team.values.DepartureLockedBy || null,
+    entitlements: mapped.entitlements,
+    refunds: mapped.refunds
+  };
+}
+
+// Whole tournament duration in calendar days, inclusive of both start and end dates (e.g. the
+// README's own "21–25 Sep 2026" reads as a 5-day event). Used to auto-calculate Dari Charges
+// for the final settlement — see _computeSettlementPreview_. Returns 0 if either date isn't
+// set yet (defensive only; both are seeded at setup and Admin-editable, never expected blank
+// live).
+function _tournamentDurationDays_() {
+  const start = getSetting_('TournamentStartDate', '');
+  const end = getSetting_('TournamentEndDate', '');
+  if (!start || !end) return 0;
+  const days = Math.round((new Date(end + 'T00:00:00Z') - new Date(start + 'T00:00:00Z')) / 86400000) + 1;
+  return days > 0 ? days : 0;
 }
 
 // Shared by getDepartureOverview_ (live preview, no persistence) and
@@ -104,9 +156,17 @@ function getDepartureOverview_(actorSession, teamId) {
 // computes.
 function _computeSettlementPreview_(teamId) {
   const charges = findRowsByField_('CHARGES', 'TeamId', teamId)[0] || null;
+  const team = findRowById_('TEAMS', 'TeamId', teamId);
   const packages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
   const grossMealCharges = packages.reduce(function (sum, p) { return sum + Number(p.Amount); }, 0);
-  const grossDariCharges = charges ? Number(charges.DariCharges) : 0;
+  // Dari Charges are always included in the final settlement regardless of whether they were
+  // ticked at registration (correction 2026-08-20) — auto-calculated as rate x team members x
+  // tournament days, using the rate snapshotted at registration (rate-locking, spec §19) if
+  // this team has a CHARGES row, else the live RateDari setting as a fallback for a team whose
+  // charges haven't been calculated yet.
+  const rateDari = charges ? Number(charges.RateDariSnapshot) : Number(getSetting_('RateDari', '0'));
+  const numberOfTeamMembers = team ? Number(team.values.NumberOfTeamMembers) : 0;
+  const grossDariCharges = rateDari * numberOfTeamMembers * _tournamentDurationDays_();
   const foodRefund = findRowsByField_('REFUNDS', 'TeamId', teamId).reduce(function (sum, r) { return sum + Number(r.RefundAmount); }, 0);
   const securityCollected = charges ? Number(charges.SecurityCharges) : 0;
   const securityRefundRow = findRowsByField_('SECURITY_REFUNDS', 'TeamId', teamId)[0];
@@ -121,8 +181,12 @@ function _computeSettlementPreview_(teamId) {
 
 // entries with a zero/blank amount are silently skipped (the operator simply left that row
 // alone), not treated as errors — matches the manual, per-row nature of this action.
+// Correction 2026-08-20: refund authority for unused meal coupons belongs to the Mess
+// Committee, not Registration -- Registration still initiates/holds the departure lock and
+// still sees this data as reference (getDepartureOverview_, unchanged), but only Mess/Admin
+// may actually record the amount now.
 function recordFoodRefund_(actorSession, teamId, entries) {
-  requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
+  requireRole_(actorSession, [ROLES.ADMIN, ROLES.MESS]);
   if (!entries || entries.length === 0) throw apiError_('VALIDATION_ERROR', 'At least one refund entry is required.');
 
   const lock = LockService.getScriptLock();
@@ -130,7 +194,7 @@ function recordFoodRefund_(actorSession, teamId, entries) {
   try {
     const team = findRowById_('TEAMS', 'TeamId', teamId);
     if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
-    _requireDepartureLockHeldByCaller_(actorSession, team);
+    _requireDepartureInitiated_(team);
 
     const created = [];
     const now = new Date().toISOString();

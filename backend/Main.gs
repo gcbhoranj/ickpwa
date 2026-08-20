@@ -269,6 +269,12 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return getTodaysMessSummary_(session);
   },
+  // Correction 2026-08-20: refund authority for unused meal coupons belongs to the Mess
+  // Committee, not Registration — see recordFoodRefund_'s updated role gate (Departure.gs).
+  'mess.foodRefund.overview': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getFoodRefundOverview_(session, payload.teamId);
+  },
   'accommodation.listActive': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return { allocations: listActiveAccommodation_(session, payload.kind) };

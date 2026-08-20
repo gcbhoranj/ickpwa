@@ -1164,7 +1164,8 @@ function test_departure_lockLifecycle() {
 
 function test_departure_fullRefundFlow() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
-  const otherRegSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
+  const otherMessSession = { userId: 'USR-0005', role: ROLES.MESS, sessionId: 'n' };
   const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
   let fixture = null;
   let createdTeamId = null;
@@ -1173,16 +1174,22 @@ function test_departure_fullRefundFlow() {
     createdTeamId = fixture.teamId;
 
     let threwNotInitiated = false;
-    try { recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwNotInitiated = true; assertEqual_(err.code, 'DEPARTURE_NOT_INITIATED', 'wrong code before departure is initiated'); }
+    try { recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwNotInitiated = true; assertEqual_(err.code, 'DEPARTURE_NOT_INITIATED', 'wrong code before departure is initiated'); }
     assertTrue_(threwNotInitiated, 'recordFoodRefund_ should require departure to be initiated first');
 
     initiateDeparture_(regSession, createdTeamId);
 
-    let threwOtherLocked = false;
-    try { recordFoodRefund_(otherRegSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwOtherLocked = true; assertEqual_(err.code, 'DEPARTURE_LOCKED', 'wrong code for a caller who does not hold the lock'); }
-    assertTrue_(threwOtherLocked, 'recordFoodRefund_ should reject a caller who does not hold this team\'s departure lock');
+    // Correction 2026-08-20: refund authority belongs to the Mess Committee, not
+    // Registration -- Registration still initiates/holds the departure lock, but must no
+    // longer be able to record the food refund itself, even for its own locked team.
+    let threwRegistrationForbidden = false;
+    try { recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwRegistrationForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'Registration must no longer be able to record a food refund'); }
+    assertTrue_(threwRegistrationForbidden, 'recordFoodRefund_ should reject Registration regardless of who holds the departure lock');
 
-    const refunded = recordFoodRefund_(regSession, createdTeamId, [
+    // Mess never holds the departure lock (only Registration/Admin call initiateDeparture_),
+    // so a Mess caller who is NOT the locking user must still succeed -- proves the "same
+    // locking user" restriction no longer applies to Mess callers.
+    const refunded = recordFoodRefund_(otherMessSession, createdTeamId, [
       { entitlementId: fixture.entitlementIds[0], amount: 50 },
       { entitlementId: fixture.entitlementIds[1], amount: 0 }
     ]);
@@ -1196,7 +1203,7 @@ function test_departure_fullRefundFlow() {
     assertEqual_(teamAfter.values.Status, 'REFUND_PROCESSING', 'team status should flip to REFUND_PROCESSING after a successful food refund');
 
     let threwAlready = false;
-    try { recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 25 }]); } catch (err) { threwAlready = true; assertEqual_(err.code, 'ALREADY_REFUNDED', 'wrong code for refunding the same entitlement twice'); }
+    try { recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 25 }]); } catch (err) { threwAlready = true; assertEqual_(err.code, 'ALREADY_REFUNDED', 'wrong code for refunding the same entitlement twice'); }
     assertTrue_(threwAlready, 'recordFoodRefund_ should reject refunding the same entitlement twice');
 
     let threwGated = false;
@@ -1232,8 +1239,85 @@ function test_departure_fullRefundFlow() {
   }
 }
 
+// Regression test for a live correction (2026-08-20): refund authority belongs to the Mess
+// Committee, not Registration (see test_departure_fullRefundFlow's role-gate assertions on
+// recordFoodRefund_ itself) -- Mess needs its own read path to the entitlement/refund data to
+// act on that authority, since getDepartureOverview_ (Registration/Admin's own view) stays
+// gated the way it always was. Narrower than getDepartureOverview_ on purpose: no
+// charges/security, matching the redaction philosophy already established for MESS in
+// getTeamDetail_ (spec §20/§21).
+function test_mess_getFoodRefundOverview_roleGateAndContent() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
+  let fixture = null;
+  let createdTeamId = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 3);
+    createdTeamId = fixture.teamId;
+
+    let threwForbidden = false;
+    try { getFoodRefundOverview_(regSession, createdTeamId); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'Registration must not have access to the Mess food-refund overview'); }
+    assertTrue_(threwForbidden, 'getFoodRefundOverview_ should reject Registration');
+
+    const beforeInitiate = getFoodRefundOverview_(messSession, createdTeamId);
+    assertEqual_(beforeInitiate.departureLockedBy, null, 'overview should report no departure lock before initiation');
+    assertEqual_(beforeInitiate.entitlements.length, 3, 'overview should list all 3 fixture entitlements');
+    assertTrue_(!!beforeInitiate.team.RegistrationNumber, 'overview should include basic team identity');
+    assertTrue_(!('charges' in beforeInitiate), 'Mess overview must not expose charges/security -- that stays Registration/Admin-only data');
+
+    initiateDeparture_(regSession, createdTeamId);
+    recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 30 }]);
+
+    const afterRefund = getFoodRefundOverview_(messSession, createdTeamId);
+    assertEqual_(afterRefund.departureLockedBy, regSession.userId, 'overview should reflect Registration as the departure-lock holder');
+    assertTrue_(afterRefund.entitlements.some(function (e) { return e.entitlementId === fixture.entitlementIds[0] && e.alreadyRefunded; }), 'overview should flag the refunded entitlement');
+    assertEqual_(afterRefund.refunds.length, 1, 'overview should list the recorded refund');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('REFUNDS', 'RefundId', r.RefundId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+// Regression test for a live correction (2026-08-20): Dari Charges must always be included in
+// the settlement/Final Receipt regardless of whether they were ticked at registration --
+// auto-calculated as rate x team members x tournament days, never the possibly-zero
+// CHARGES.DariCharges recorded at registration time. Reads live TournamentStartDate/EndDate
+// and RateDari rather than hardcoding an expected number, so this test stays correct
+// regardless of what those settings actually hold (this project's established convention --
+// see test_registration_calculateCharges_correctAndIdempotentGuard).
+function test_departure_settlementPreview_dariAlwaysAutoCalculated() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Dari Auto-Calc Test College', 'District', 7, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    // includeDari=false -- deliberately "unchecked" at registration, as a real operator might.
+    calculateCharges_(regSession, createdTeamId, false, false);
+
+    const startDate = getSetting_('TournamentStartDate', '');
+    const endDate = getSetting_('TournamentEndDate', '');
+    const expectedDays = Math.round((new Date(endDate + 'T00:00:00Z') - new Date(startDate + 'T00:00:00Z')) / 86400000) + 1;
+    const rateDari = Number(getSetting_('RateDari', '0'));
+
+    const charges = findRowsByField_('CHARGES', 'TeamId', createdTeamId)[0];
+    assertEqual_(Number(charges.DariCharges), 0, 'sanity check: registration-time Dari should be 0 since it was unticked');
+
+    const preview = getDepartureOverview_(regSession, createdTeamId).settlementPreview;
+    assertEqual_(preview.grossDariCharges, rateDari * 7 * expectedDays, 'settlement preview must auto-calculate Dari as rate x team members x tournament days, ignoring the unticked registration-time value');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 function test_departure_overview_suggestedRefundReflectsUnusedAmount() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
   let fixture = null;
   try {
     fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 5);
@@ -1244,9 +1328,11 @@ function test_departure_overview_suggestedRefundReflectsUnusedAmount() {
     assertEqual_(dinner.suggestedRefund, 50, 'suggested refund should be remainingPersons (5) x rate (10) for an unused entitlement');
     assertTrue_(!dinner.alreadyRefunded, 'dinner should not be already refunded yet');
 
-    // Manual refund entry, unchanged from Phase 7's design (spec §22 — Convener's discretion,
-    // never auto-applied) — suggestedRefund is a hint only, not a value the backend writes itself.
-    recordFoodRefund_(regSession, fixture.teamId, [{ entitlementId: dinner.entitlementId, amount: 50 }]);
+    // Manual refund entry, unchanged from Phase 7's design (spec §22 — Mess Convener's
+    // discretion, never auto-applied) — suggestedRefund is a hint only, not a value the
+    // backend writes itself. Entered by Mess (correction 2026-08-20 — recordFoodRefund_'s
+    // authority moved from Registration to Mess), read back via Registration's own overview.
+    recordFoodRefund_(messSession, fixture.teamId, [{ entitlementId: dinner.entitlementId, amount: 50 }]);
 
     const after = getDepartureOverview_(regSession, fixture.teamId);
     const dinnerAfter = after.entitlements.filter(function (e) { return e.meal === 'DINNER'; })[0];
@@ -1277,6 +1363,7 @@ function test_finalDocuments_numberToWordsIndian() {
 
 function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
   const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
   let fixture = null;
   let createdTeamId = null;
@@ -1286,7 +1373,7 @@ function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
     createdTeamId = fixture.teamId;
 
     initiateDeparture_(regSession, createdTeamId);
-    recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
+    recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
 
     let threwNoNoc = false;
     try {
@@ -1396,6 +1483,7 @@ function test_finalDocuments_emailFailureCapturesErrorMessage() {
 // directly (no mocking in this project — see file header), not just the DB row.
 function test_finalDocuments_receiptExcludesSecurityFromContent() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
   const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
   let fixture = null;
   let createdTeamId = null;
@@ -1406,34 +1494,45 @@ function test_finalDocuments_receiptExcludesSecurityFromContent() {
     createdTeamId = fixture.teamId;
     updateRowById_('FOOD_PACKAGES', 'PackageId', fixture.packageId, { Amount: 300 });
 
+    // RateDariSnapshot: 10 -- a nonzero, non-default test rate. Dari is now always
+    // auto-calculated from this rate x team members x tournament days (correction
+    // 2026-08-20), never read from the DariCharges field below, so this row's DariCharges
+    // value is deliberately left stale/irrelevant to prove that.
     chargeId = nextId_('CHG', 4);
     appendRow_('CHARGES', {
       ChargeId: chargeId, TeamId: createdTeamId, RateBreakfastSnapshot: 0, RateLunchSnapshot: 0,
-      RateDinnerSnapshot: 0, RateDariSnapshot: 0, SecurityAmountSnapshot: 500, DariCharges: 50,
-      MealCharges: 0, SecurityCharges: 500, TotalPayable: 550, CalculatedAt: new Date().toISOString(), CreatedBy: regSession.userId
+      RateDinnerSnapshot: 0, RateDariSnapshot: 10, SecurityAmountSnapshot: 500, DariCharges: 0,
+      MealCharges: 0, SecurityCharges: 500, TotalPayable: 500, CalculatedAt: new Date().toISOString(), CreatedBy: regSession.userId
     });
 
     initiateDeparture_(regSession, createdTeamId);
-    recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
+    recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
     appendRow_('ACCOMMODATION_NOC', {
       NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
       IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
     });
     recordSecurityRefund_(regSession, createdTeamId, 500);
 
-    // grossCharges = 300 (meal) + 50 (dari) = 350; netCharges = 350 - 40 (food refund) = 310.
-    // Old FinalBalance = 40 (food) + 500 (security) - 0 (adjustments) = 540 -- a materially
-    // different number that must NOT be what the receipt shows or spells out in words.
+    // grossDari = 10 (rate) x 3 (team members) x tournament days (live setting, read the same
+    // way _computeSettlementPreview_ computes it — see test_departure_settlementPreview_
+    // dariAlwaysAutoCalculated for the from-scratch version of this formula).
+    // grossCharges = 300 (meal) + grossDari; netCharges = grossCharges - 40 (food refund).
+    // FinalBalance = 40 (food) + 500 (security) - 0 (adjustments) = 540 regardless -- a
+    // materially different number that must NOT be what the receipt shows or spells out.
+    const expectedGrossDari = 10 * 3 * _tournamentDurationDays_();
+    const expectedNetCharges = 300 + expectedGrossDari - 40;
+
     const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
     trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
 
     const settlement = findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId)[0];
+    assertEqual_(Number(settlement.GrossDariCharges), expectedGrossDari, 'SETTLEMENTS.GrossDariCharges should be the auto-calculated figure, not the stale CHARGES.DariCharges');
     assertEqual_(Number(settlement.SecurityRefunded), 500, 'SETTLEMENTS should still record the real security refund internally');
     assertEqual_(Number(settlement.FinalBalance), 540, 'SETTLEMENTS.FinalBalance must still be the true total cash returned (unchanged internal bookkeeping)');
 
     const receiptRow = findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).filter(function (r) { return r.Type === 'FINAL'; })[0];
-    const expectedWords = _numberToWordsIndian_(310);
-    assertEqual_(receiptRow.AmountInWords, expectedWords, 'Final Receipt AmountInWords must reflect Net Charges (Meal+Dari only), not FinalBalance including security');
+    const expectedWords = _numberToWordsIndian_(expectedNetCharges);
+    assertEqual_(receiptRow.AmountInWords, expectedWords, 'Final Receipt AmountInWords must reflect Net Charges (auto-calculated Dari included), not FinalBalance including security');
     assertTrue_(receiptRow.AmountInWords.indexOf('Five Hundred Forty') === -1, 'receipt words must not accidentally spell out the security-inclusive total');
   } finally {
     trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
@@ -1671,7 +1770,7 @@ function test_e2e_fullTeamLifecycle() {
     // 5. Departure: initiate, refund the one un-served Breakfast slot, finalize (2 real PDFs + email, RELIEVED).
     initiateDeparture_(regSession, createdTeamId);
     const breakfastEntitlement = findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', createdTeamId).filter(function (e) { return e.Meal === 'BREAKFAST'; })[0];
-    assertEqual_(recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: breakfastEntitlement.EntitlementId, amount: 50 }]).refundIds.length, 1, 'the one un-served breakfast slot should be refunded');
+    assertEqual_(recordFoodRefund_(messSession, createdTeamId, [{ entitlementId: breakfastEntitlement.EntitlementId, amount: 50 }]).refundIds.length, 1, 'the one un-served breakfast slot should be refunded');
 
     const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', nextDayDate, ['not-a-real-inbox@example.invalid']);
     trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
@@ -2479,6 +2578,8 @@ const TEST_CASES = [
   { name: 'departure_lockLifecycle', fn: test_departure_lockLifecycle },
   { name: 'departure_fullRefundFlow', fn: test_departure_fullRefundFlow },
   { name: 'departure_overview_suggestedRefundReflectsUnusedAmount', fn: test_departure_overview_suggestedRefundReflectsUnusedAmount },
+  { name: 'mess_getFoodRefundOverview_roleGateAndContent', fn: test_mess_getFoodRefundOverview_roleGateAndContent },
+  { name: 'departure_settlementPreview_dariAlwaysAutoCalculated', fn: test_departure_settlementPreview_dariAlwaysAutoCalculated },
   { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
   { name: 'reports_getAll_adminOnlyAndAggregatesTeamCorrectly', fn: test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly },
   { name: 'reports_auditLog_scopesToOwnActionsForNonAdmin', fn: test_reports_auditLog_scopesToOwnActionsForNonAdmin },

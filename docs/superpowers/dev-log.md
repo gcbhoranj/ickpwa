@@ -1001,3 +1001,64 @@ outside, all fixed:
   re-split, which is out of scope here. Service worker bumped to v30.
 - Deployed to production Apps Script @144 (intermediate @143 was tests-only, deliberately
   deployed first to capture the live RED before touching implementation).
+
+## 2026-08-20 — Group G: refund authority correction + Dari auto-calculation
+
+Seventh sub-project, two live corrections from the human partner:
+
+1. **Food-refund authority belongs to the Mess Committee, not Registration.** Phase 7 (spec
+   §22) had deliberately decided "refund amounts are the Mess Committee Convener's discretion,
+   not a fixed formula" — but then gave the actual `recordFoodRefund_` action to
+   `[ROLES.ADMIN, ROLES.REGISTRATION]` only, with Registration expected to consult Mess
+   off-system and type in whatever Mess told them. Corrected to match the decision that was
+   already on record: `recordFoodRefund_` is now `[ROLES.ADMIN, ROLES.MESS]`.
+   - Mess never calls `initiateDeparture_` (that stays Registration's job), so it can never
+     satisfy the old "same locking user" check. Split `_requireDepartureLockHeldByCaller_` into
+     that check plus a new, weaker `_requireDepartureInitiated_` (departure must be underway,
+     caller identity doesn't matter) — the latter is what `recordFoodRefund_` uses now; the
+     former still guards Registration's own actions (cancel/security-refund/finalize)
+     unchanged.
+   - New `getFoodRefundOverview_`/`mess.foodRefund.overview` — Mess's own read path to the
+     Eligible/Served/Remaining/refund data it now acts on, narrower than
+     `getDepartureOverview_` (no charges/security/settlement preview), same redaction
+     philosophy already established for MESS in `getTeamDetail_`. Shared entitlement-mapping
+     logic factored into `_mapEntitlementsForOverview_` so the two overviews can't drift.
+   - Frontend: `departure.js`'s meal-entitlement table is now read-only for Registration
+     (shows "Refunded: Rs X" / "Awaiting Mess Committee" per row, entry form removed — the
+     backend rejects Registration's attempts regardless, this just stops the UI lying about
+     what Registration can do). New `mess.js` `renderFoodRefundScreen` — the actual entry form,
+     moved verbatim — reached from a new "Food Refund" button on Team Detail (MESS role).
+2. **Dari Charges must always be in the Final Receipt, auto-calculated** — regardless of
+   whether they were ticked at registration (`calculateCharges_`'s `includeDari` toggle can
+   leave `CHARGES.DariCharges` at 0). Per explicit direction: rate × team members × tournament
+   days. New `_tournamentDurationDays_()` (`TournamentEndDate − TournamentStartDate`,
+   inclusive of both ends — the README's own "21–25 Sep 2026" reads as a 5-day event).
+   `_computeSettlementPreview_`'s `grossDariCharges` no longer reads `CHARGES.DariCharges` at
+   all — always `RateDariSnapshot × NumberOfTeamMembers × tournamentDays` (live `RateDari`
+   setting as a fallback only when a team has no `CHARGES` row yet), preserving rate-locking
+   (spec §19) for teams that do. This flows through the one shared function into both the live
+   Departure-screen preview and the persisted `SETTLEMENTS`/Final Receipt — they can't drift
+   apart. Deliberately scoped to the settlement/receipt calculation only — `Reports.gs`'s
+   collections figures still read the real `CHARGES`/`PAYMENTS` records unchanged, since those
+   report what was actually collected, a different question from what the final receipt should
+   show.
+- **Testing**: TDD, watched fail live (3 new tests RED for the expected reason before
+  implementing, GREEN after): `departure_fullRefundFlow` extended in place (Registration now
+  gets `FORBIDDEN`; a Mess caller who isn't the lock holder still succeeds),
+  `mess_getFoodRefundOverview_roleGateAndContent`,
+  `departure_settlementPreview_dariAlwaysAutoCalculated` (reads live
+  `TournamentStartDate`/`EndDate`/`RateDari` rather than hardcoding an expected number, this
+  project's established convention for settings-dependent tests). Fixed 4 other existing tests
+  that called `recordFoodRefund_` as Registration or asserted a stale hardcoded Dari-less
+  total once the auto-calc changed the math
+  (`test_finalDocuments_receiptExcludesSecurityFromContent`,
+  `test_departure_finalizeGeneratesDocumentsAndReliefsTeam`,
+  `test_departure_overview_suggestedRefundReflectsUnusedAmount`,
+  `test_e2e_fullTeamLifecycle`) — all regression-checked individually and green, including the
+  full 6-real-PDF e2e test. A full `fast`-tier run also timed out against the live script (same
+  single-HTTP-round-trip ceiling `pdf2` hit in Group F, now hitting `fast` too as the suite
+  keeps growing) — targeted spot-checks above cover the actual change surface; a tier re-split
+  is its own follow-up, out of scope here.
+- Deployed to production Apps Script @147 (@145 tests-only RED, @146 implementation, @147
+  fixed the 4 existing tests the auto-calc/authority change broke). Service worker bumped
+  to v31.
