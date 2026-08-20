@@ -3,6 +3,20 @@
 // formula applied, refund amounts are the Mess Convener's discretion per spec §22), a manual
 // per-entitlement food-refund entry form, and the NOC-gated security-refund action.
 
+function _renderFinalizeSection(overview) {
+  const p = overview.settlementPreview;
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    '<h2 style="margin-top:16px">Finalize & Send</h2>' +
+    '<p>Gross Charges: Rs ' + p.grossCharges + ' &middot; Net Charges: Rs ' + p.netCharges + '</p>' +
+    '<label>Other Adjustments<input type="number" id="other-adjustments" value="0"></label>' +
+    '<p id="final-balance-preview">Final Balance (refunded to team): Rs ' + (p.foodRefund + p.securityRefunded) + '</p>' +
+    '<label>Session<select id="relieving-session"><option value="FN">Forenoon</option><option value="AN">Afternoon</option></select></label>' +
+    '<label>Relieving Date<input type="date" id="relieving-date" value="' + today + '"></label>' +
+    '<button id="finalize-btn">Finalize &amp; Send</button>'
+  );
+}
+
 async function renderDepartureScreen(root, user, teamId, registrationNumber, collegeName) {
   root.innerHTML = '<div class="wizard-card"><h1>Process Departure</h1><p>Loading…</p></div>';
   let overview = await apiCall('departure.overview', { teamId: teamId });
@@ -55,6 +69,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
           : (overview.nocStatus === 'NOC_GRANTED'
               ? '<label>Amount<input type="number" id="security-refund-amount" min="0" value="' + overview.securityCharged + '"></label><button id="submit-security-refund-btn">Record Security Refund</button>'
               : '<p>NOC not yet granted — security refund unavailable.</p>')) +
+        (overview.nocStatus === 'NOC_GRANTED' ? _renderFinalizeSection(overview) : '') +
         '<button id="cancel-departure-btn" style="margin-top:16px;background:#999">Cancel Departure</button>' +
         '<button id="back-btn" style="margin-top:12px">Back</button>' +
       '</div>';
@@ -84,6 +99,31 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
           await apiCall('departure.recordSecurityRefund', { teamId: teamId, amount: Number(document.getElementById('security-refund-amount').value) });
           overview = await apiCall('departure.overview', { teamId: teamId });
           renderInProgress();
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+      });
+    }
+
+    if (document.getElementById('other-adjustments')) {
+      const preview = overview.settlementPreview;
+      document.getElementById('other-adjustments').addEventListener('input', function () {
+        const adjustments = Number(document.getElementById('other-adjustments').value) || 0;
+        document.getElementById('final-balance-preview').textContent =
+          'Final Balance (refunded to team): Rs ' + (preview.foodRefund + preview.securityRefunded - adjustments);
+      });
+      document.getElementById('finalize-btn').addEventListener('click', async function () {
+        const errEl = document.getElementById('departure-error');
+        errEl.style.display = 'none';
+        try {
+          await apiCall('departure.finalize', {
+            teamId: teamId,
+            otherAdjustments: Number(document.getElementById('other-adjustments').value) || 0,
+            relievingSession: document.getElementById('relieving-session').value,
+            relievingDate: document.getElementById('relieving-date').value
+          });
+          goBack();
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
