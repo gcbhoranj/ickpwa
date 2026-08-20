@@ -155,5 +155,14 @@ function issueNoc_(actorSession, teamId) {
     Action: 'ISSUE_NOC', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: 'NOC_GRANTED'
   });
 
+  // Granting NOC means the Accommodation Committee has no objection to the team leaving —
+  // physically, that also means whatever rooms they held are free again. Auto-vacate every
+  // still-ALLOCATED row for this team (both TEAM and INCHARGE kind) rather than leaving the
+  // operator to remember a second manual step. vacateRoom_ is already idempotent per-row, so
+  // this is safe to run even on a re-grant that finds nothing left to vacate.
+  findRowsByField_('ACCOMMODATION', 'TeamId', teamId)
+    .filter(function (a) { return a.Status === 'ALLOCATED'; })
+    .forEach(function (a) { vacateRoom_(actorSession, a.AllocationId); });
+
   return { nocId: nocId, teamId: teamId, status: 'NOC_GRANTED', pdfFileId: pdfFile.getId(), pdfUrl: 'https://drive.google.com/file/d/' + pdfFile.getId() + '/view' };
 }

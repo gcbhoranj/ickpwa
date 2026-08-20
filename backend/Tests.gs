@@ -596,6 +596,39 @@ function test_registration_registerTeam_needsAccommodationFlag() {
   }
 }
 
+function test_registration_getTeamDetail_includesRelievingOrder() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  let relievingId = null;
+  try {
+    const team = registerTeam_(regSession, 'Relieving Detail Test College', 'District', 4, [{ name: 'Incharge', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const beforeDetail = getTeamDetail_(regSession, createdTeamId);
+    assertEqual_(beforeDetail.relieving.length, 0, 'a team with no relieving order yet should report an empty list');
+
+    // Manually inserted, like the NOC/SETTLEMENTS fixtures elsewhere in this file — the real
+    // PDF-generating path (finalizeDepartureAndGenerateDocuments_) is already covered by
+    // test_departure_finalizeGeneratesDocumentsAndReliefsTeam; this test only needs the row.
+    relievingId = nextId_('REL', 4);
+    appendRow_('RELIEVING', {
+      RelievingId: relievingId, RelievingNumber: 'TEST/REL/0001', TeamId: createdTeamId, Session: 'FN',
+      RelievingDate: '2026-09-25', InchargeNamesText: 'Incharge', TeamMemberCount: 4,
+      GeneratedAt: new Date().toISOString(), GeneratedBy: regSession.userId, PdfFileId: 'test-fixture-no-real-pdf'
+    });
+
+    const afterDetail = getTeamDetail_(regSession, createdTeamId);
+    assertEqual_(afterDetail.relieving.length, 1, 'getTeamDetail_ should surface the generated relieving order');
+    assertEqual_(afterDetail.relieving[0].RelievingId, relievingId, 'getTeamDetail_ returned the wrong relieving row');
+  } finally {
+    if (relievingId) deleteRowById_('RELIEVING', 'RelievingId', relievingId);
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 function test_registration_getTeamDetail_redactsFinancialsForMess() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
@@ -938,6 +971,54 @@ function test_accommodation_issueNoc() {
   }
 }
 
+function test_accommodation_issueNoc_autoVacatesRooms() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'w' };
+  const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  const marker = 'TEST-NOCVACATE-' + new Date().getTime();
+  let createdTeamId = null;
+  let teamRoomId = null, inchargeRoomId = null;
+  let pdfFileIdToTrash = null;
+  try {
+    const team = registerTeam_(regSession, 'NOC Auto-Vacate Test College', 'District', 3, [
+      { name: 'Coach', isPrimary: true, needsAccommodation: true }
+    ]);
+    createdTeamId = team.teamId;
+
+    const teamRoom = createRoom_(adminSession, marker + '-TEAM', 'Hostel', '1', 3, ROOM_TYPES.TEAM);
+    teamRoomId = teamRoom.roomId;
+    const inchargeRoom = createRoom_(adminSession, marker + '-INCHARGE', 'Rest House', '1', 1, ROOM_TYPES.INCHARGE);
+    inchargeRoomId = inchargeRoom.roomId;
+
+    const teamAlloc = allocateRoom_(accSession, createdTeamId, teamRoomId, 3, ROOM_TYPES.TEAM);
+    const inchargeAlloc = allocateRoom_(accSession, createdTeamId, inchargeRoomId, 1, ROOM_TYPES.INCHARGE);
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === teamRoomId; })[0].remaining, 0, 'team room should be fully allocated before NOC');
+
+    const granted = issueNoc_(accSession, createdTeamId);
+    pdfFileIdToTrash = granted.pdfFileId;
+
+    const teamAllocAfter = findRowById_('ACCOMMODATION', 'AllocationId', teamAlloc.allocationId);
+    const inchargeAllocAfter = findRowById_('ACCOMMODATION', 'AllocationId', inchargeAlloc.allocationId);
+    assertEqual_(teamAllocAfter.values.Status, 'VACATED', 'granting NOC should auto-vacate the team room allocation');
+    assertEqual_(inchargeAllocAfter.values.Status, 'VACATED', 'granting NOC should auto-vacate the incharge room allocation');
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === teamRoomId; })[0].remaining, 3, 'team room should be fully freed after NOC auto-vacate');
+    assertEqual_(listRooms_(accSession).filter(function (r) { return r.roomId === inchargeRoomId; })[0].remaining, 1, 'incharge room should be fully freed after NOC auto-vacate');
+
+    // Idempotent replay must not error trying to vacate already-VACATED allocations again.
+    issueNoc_(accSession, createdTeamId);
+  } finally {
+    if (pdfFileIdToTrash) DriveApp.getFileById(pdfFileIdToTrash).setTrashed(true);
+    if (createdTeamId) {
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+      findRowsByField_('ACCOMMODATION', 'TeamId', createdTeamId).forEach(function (a) { deleteRowById_('ACCOMMODATION', 'AllocationId', a.AllocationId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+    if (teamRoomId) deleteRowById_('ROOMS', 'RoomId', teamRoomId);
+    if (inchargeRoomId) deleteRowById_('ROOMS', 'RoomId', inchargeRoomId);
+  }
+}
+
 function test_registration_getTeamDetail_redactsFinancialsForAccommodation() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const accSession = { userId: 'USR-0001', role: ROLES.ACCOMMODATION, sessionId: 'z' };
@@ -1073,6 +1154,37 @@ function test_departure_fullRefundFlow() {
       findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
     }
     if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+function test_departure_overview_suggestedRefundReflectsUnusedAmount() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let fixture = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 5);
+    initiateDeparture_(regSession, fixture.teamId);
+
+    const before = getDepartureOverview_(regSession, fixture.teamId);
+    const dinner = before.entitlements.filter(function (e) { return e.meal === 'DINNER'; })[0];
+    assertEqual_(dinner.suggestedRefund, 50, 'suggested refund should be remainingPersons (5) x rate (10) for an unused entitlement');
+    assertTrue_(!dinner.alreadyRefunded, 'dinner should not be already refunded yet');
+
+    // Manual refund entry, unchanged from Phase 7's design (spec §22 — Convener's discretion,
+    // never auto-applied) — suggestedRefund is a hint only, not a value the backend writes itself.
+    recordFoodRefund_(regSession, fixture.teamId, [{ entitlementId: dinner.entitlementId, amount: 50 }]);
+
+    const after = getDepartureOverview_(regSession, fixture.teamId);
+    const dinnerAfter = after.entitlements.filter(function (e) { return e.meal === 'DINNER'; })[0];
+    assertTrue_(dinnerAfter.alreadyRefunded, 'dinner should be flagged already refunded');
+    assertEqual_(dinnerAfter.suggestedRefund, 0, 'an already-refunded entitlement should not keep suggesting a refund');
+
+    const lunch = after.entitlements.filter(function (e) { return e.meal === 'LUNCH'; })[0];
+    assertEqual_(lunch.suggestedRefund, 35, 'suggested refund should be remainingPersons (5) x rate (7) for lunch, unaffected by dinner\'s refund');
+  } finally {
+    if (fixture) {
+      findRowsByField_('REFUNDS', 'TeamId', fixture.teamId).forEach(function (r) { deleteRowById_('REFUNDS', 'RefundId', r.RefundId); });
+      _cleanupMessTestFixture_(fixture);
+    }
   }
 }
 
@@ -1343,6 +1455,19 @@ function test_settings_tournamentInfo_updateAndValidate() {
   } finally {
     updateTournamentInfo_(adminSession, before);
   }
+}
+
+function test_settings_getPublicTournamentInfo_matchesAdminView() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'a' };
+  const adminView = getTournamentInfo_(adminSession);
+  const publicView = getPublicTournamentInfo_();
+  assertEqual_(publicView.tournamentName, adminView.tournamentName, 'public tournament info should match the live TournamentName setting');
+  assertEqual_(publicView.organizerName, adminView.organizerName, 'public tournament info should match the live OrganizerName setting');
+  assertEqual_(publicView.districtAddress, adminView.districtAddress, 'public tournament info should match the live DistrictAddress setting');
+  assertEqual_(publicView.tournamentStartDate, adminView.tournamentStartDate, 'public tournament info should match the live TournamentStartDate setting');
+  assertEqual_(publicView.tournamentEndDate, adminView.tournamentEndDate, 'public tournament info should match the live TournamentEndDate setting');
+  assertTrue_(!publicView.hasOwnProperty('financialSettingsLocked') && !publicView.hasOwnProperty('rateDari'),
+    'public (no-session) tournament info must never leak financial settings');
 }
 
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
@@ -2008,6 +2133,7 @@ const TEST_CASES = [
   { name: 'receipts_generateTemporaryReceipt_guardsMissingData', fn: test_receipts_generateTemporaryReceipt_guardsMissingData },
   { name: 'registration_listAndDetailTeams', fn: test_registration_listAndDetailTeams },
   { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag },
+  { name: 'registration_getTeamDetail_includesRelievingOrder', fn: test_registration_getTeamDetail_includesRelievingOrder },
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },
@@ -2021,10 +2147,12 @@ const TEST_CASES = [
   { name: 'registration_getTeamDetail_redactsFinancialsForAccommodation', fn: test_registration_getTeamDetail_redactsFinancialsForAccommodation },
   { name: 'departure_lockLifecycle', fn: test_departure_lockLifecycle },
   { name: 'departure_fullRefundFlow', fn: test_departure_fullRefundFlow },
+  { name: 'departure_overview_suggestedRefundReflectsUnusedAmount', fn: test_departure_overview_suggestedRefundReflectsUnusedAmount },
   { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
   { name: 'reports_getAll_adminOnlyAndAggregatesTeamCorrectly', fn: test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly },
   { name: 'reports_auditLog_scopesToOwnActionsForNonAdmin', fn: test_reports_auditLog_scopesToOwnActionsForNonAdmin },
   { name: 'settings_tournamentInfo_updateAndValidate', fn: test_settings_tournamentInfo_updateAndValidate },
+  { name: 'settings_getPublicTournamentInfo_matchesAdminView', fn: test_settings_getPublicTournamentInfo_matchesAdminView },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
@@ -2047,6 +2175,7 @@ const TEST_CASES = [
   { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf2' },
   { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' },
   { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' },
+  { name: 'accommodation_issueNoc_autoVacatesRooms', fn: test_accommodation_issueNoc_autoVacatesRooms, tier: 'pdf2' },
   { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' },
   // Phase 10: full cross-module lifecycle, 6 real PDF generations — own tier so it never
   // competes with pdf1/pdf2's own budget against the 6-minute ceiling.

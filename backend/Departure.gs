@@ -76,11 +76,17 @@ function getDepartureOverview_(actorSession, teamId) {
     incharges: findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId),
     packages: findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId),
     entitlements: findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', teamId).map(function (e) {
+      const alreadyRefunded = !!refundedEntitlementIds[e.EntitlementId];
       return {
         entitlementId: e.EntitlementId, meal: e.Meal, date: e.Date, rate: Number(e.Rate),
         eligiblePersons: Number(e.EligiblePersons), servedPersons: Number(e.ServedPersons),
         remainingPersons: Number(e.RemainingPersons), mealOrderStatus: e.MealOrderStatus,
-        alreadyRefunded: !!refundedEntitlementIds[e.EntitlementId]
+        alreadyRefunded: alreadyRefunded,
+        // A hint only, never written anywhere or auto-applied — refund amount stays the
+        // Convener's manual judgment call per the Phase 7 decision (spec §22). Lets the
+        // operator see what "fully unused" would amount to instead of guessing from the raw
+        // Eligible/Served/Remaining columns.
+        suggestedRefund: alreadyRefunded ? 0 : Number(e.RemainingPersons) * Number(e.Rate)
       };
     }),
     securityCharged: charges ? Number(charges.SecurityCharges) : 0,

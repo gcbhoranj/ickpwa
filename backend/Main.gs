@@ -117,6 +117,11 @@ const ACTIONS = {
   'auth.login': function (payload) {
     return handleLogin_(payload.identifier, payload.password);
   },
+  // Public (no session) — the login screen needs the live tournament name/dates before a user
+  // has authenticated. See getPublicTournamentInfo_'s header comment for why this is safe.
+  'public.getTournamentInfo': function () {
+    return getPublicTournamentInfo_();
+  },
   'auth.logout': function (payload, sessionId) {
     requireSession_(sessionId);
     revokeSession_(sessionId);

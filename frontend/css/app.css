@@ -37,6 +37,7 @@ button:hover { background: var(--brand-light); }
   font-weight: 600; padding: 10px 12px; border-radius: 8px; margin: 8px 0;
 }
 
+.hint { color: #777; font-size: 0.75rem; margin-top: 2px; }
 table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
 .users-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 600px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }

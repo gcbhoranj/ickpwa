@@ -147,6 +147,7 @@ function getTeamDetail_(actorSession, teamId) {
     incharges: findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId),
     charges: charges.length > 0 ? charges[0] : null,
     payments: findRowsByField_('PAYMENTS', 'TeamId', teamId),
-    receipts: findRowsByField_('RECEIPTS', 'TeamId', teamId)
+    receipts: findRowsByField_('RECEIPTS', 'TeamId', teamId),
+    relieving: findRowsByField_('RELIEVING', 'TeamId', teamId)
   };
 }

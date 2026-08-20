@@ -60,11 +60,39 @@ const ROLE_LABELS = {
   MESS: 'Mess Committee', ACCOMMODATION: 'Accommodation Committee'
 };
 
-function renderLogin(root, errorMessage) {
+// Static fallback — used only if the pre-login public.getTournamentInfo fetch fails (e.g. a
+// brand-new deployment before seedSettings_ has run) so the login screen never renders blank.
+const LOGIN_FALLBACK_TITLE = 'HPU Inter-College Kabaddi 2026';
+const LOGIN_FALLBACK_SUBTITLE = 'Government College Bhoranj (Tarkwari) · 21–25 Sep 2026';
+
+function _formatTournamentDateRange(startDate, endDate) {
+  if (!startDate || !endDate) return '';
+  const opts = { day: 'numeric', month: 'short' };
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  const startLabel = start.toLocaleDateString('en-IN', opts);
+  const endLabel = end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  return startLabel + '–' + endLabel;
+}
+
+async function renderLogin(root, errorMessage) {
+  root.innerHTML = '<div class="login-card"><h1>' + LOGIN_FALLBACK_TITLE + '</h1><p class="subtitle">Loading…</p></div>';
+  let title = LOGIN_FALLBACK_TITLE;
+  let subtitle = LOGIN_FALLBACK_SUBTITLE;
+  try {
+    const info = await apiCall('public.getTournamentInfo', {});
+    if (info.tournamentName) title = info.tournamentName;
+    const dateRange = _formatTournamentDateRange(info.tournamentStartDate, info.tournamentEndDate);
+    if (info.organizerName || dateRange) {
+      subtitle = [info.organizerName, dateRange].filter(function (s) { return !!s; }).join(' · ');
+    }
+  } catch (err) {
+    // Pre-login and best-effort — keep the static fallback rather than blocking the login form.
+  }
   root.innerHTML =
     '<div class="login-card">' +
-      '<h1>HPU Inter-College Kabaddi 2026</h1>' +
-      '<p class="subtitle">Government College Bhoranj (Tarkwari) &middot; 21&ndash;25 Sep 2026</p>' +
+      '<h1>' + title + '</h1>' +
+      '<p class="subtitle">' + subtitle + '</p>' +
       (errorMessage ? '<p class="error">' + errorMessage + '</p>' : '') +
       '<form id="login-form">' +
         '<label>Login ID / Email<input type="text" id="identifier" required autocomplete="username"></label>' +

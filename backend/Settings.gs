@@ -102,6 +102,18 @@ function getTournamentInfo_(actorSession) {
   };
 }
 
+// No actorSession/role gate — deliberately callable before login (the login screen needs the
+// live tournament name/dates, same info this app already shows unauthenticated). Mirrors
+// getTournamentInfo_'s shape exactly but omits anything financial, so it's safe to expose with
+// no session at all — see Main.gs's `public.*` action-naming convention for other pre-auth reads.
+function getPublicTournamentInfo_() {
+  return {
+    tournamentName: getSetting_('TournamentName', ''), organizerName: getSetting_('OrganizerName', ''),
+    districtAddress: getSetting_('DistrictAddress', ''),
+    tournamentStartDate: getSetting_('TournamentStartDate', ''), tournamentEndDate: getSetting_('TournamentEndDate', '')
+  };
+}
+
 function updateTournamentInfo_(actorSession, info) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   if (!info || !info.tournamentName) throw apiError_('VALIDATION_ERROR', 'Tournament name is required.');
