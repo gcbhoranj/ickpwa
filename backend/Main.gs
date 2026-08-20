@@ -266,6 +266,26 @@ const ACTIONS = {
   'accommodation.noc.issue': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return issueNoc_(session, payload.teamId);
+  },
+  'departure.initiate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return initiateDeparture_(session, payload.teamId);
+  },
+  'departure.cancel': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return cancelDeparture_(session, payload.teamId);
+  },
+  'departure.overview': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getDepartureOverview_(session, payload.teamId);
+  },
+  'departure.recordFoodRefund': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return recordFoodRefund_(session, payload.teamId, payload.entries || []);
+  },
+  'departure.recordSecurityRefund': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return recordSecurityRefund_(session, payload.teamId, payload.amount);
   }
 };
 

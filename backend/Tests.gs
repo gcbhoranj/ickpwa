@@ -966,6 +966,116 @@ function test_registration_getTeamDetail_redactsFinancialsForAccommodation() {
   }
 }
 
+function test_departure_lockLifecycle() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const otherRegSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const adminSession = { userId: 'USR-0003', role: ROLES.ADMIN, sessionId: 'z' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Departure Lock Test College', 'District', 3, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const first = initiateDeparture_(regSession, createdTeamId);
+    assertEqual_(first.departureLockedBy, 'USR-0001', 'lock should be held by the initiating user');
+    assertEqual_(first.resumed, false, 'first initiate should not be a resume');
+
+    const resumed = initiateDeparture_(regSession, createdTeamId);
+    assertEqual_(resumed.resumed, true, 're-initiating by the same user should be an idempotent resume');
+
+    let threwLocked = false;
+    try { initiateDeparture_(otherRegSession, createdTeamId); } catch (err) { threwLocked = true; assertEqual_(err.code, 'DEPARTURE_LOCKED', 'wrong code for a departure locked by someone else'); }
+    assertTrue_(threwLocked, 'initiateDeparture_ should reject a different user while locked');
+
+    let threwForbidden = false;
+    try { cancelDeparture_(otherRegSession, createdTeamId); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for a non-holder, non-admin cancel'); }
+    assertTrue_(threwForbidden, 'cancelDeparture_ should reject a non-holder, non-admin caller');
+
+    const cancelledByAdmin = cancelDeparture_(adminSession, createdTeamId);
+    assertTrue_(cancelledByAdmin.cancelled, 'Admin should be able to cancel any locked departure');
+
+    const afterCancel = findRowById_('TEAMS', 'TeamId', createdTeamId);
+    assertEqual_(afterCancel.values.DepartureLockedBy, '', 'lock fields should be cleared after cancel');
+
+    const cancelAgain = cancelDeparture_(regSession, createdTeamId);
+    assertTrue_(cancelAgain.cancelled, 'cancelling an already-unlocked team should be a safe no-op');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+function test_departure_fullRefundFlow() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const otherRegSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'y' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 5);
+    createdTeamId = fixture.teamId;
+
+    let threwNotInitiated = false;
+    try { recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwNotInitiated = true; assertEqual_(err.code, 'DEPARTURE_NOT_INITIATED', 'wrong code before departure is initiated'); }
+    assertTrue_(threwNotInitiated, 'recordFoodRefund_ should require departure to be initiated first');
+
+    initiateDeparture_(regSession, createdTeamId);
+
+    let threwOtherLocked = false;
+    try { recordFoodRefund_(otherRegSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 50 }]); } catch (err) { threwOtherLocked = true; assertEqual_(err.code, 'DEPARTURE_LOCKED', 'wrong code for a caller who does not hold the lock'); }
+    assertTrue_(threwOtherLocked, 'recordFoodRefund_ should reject a caller who does not hold this team\'s departure lock');
+
+    const refunded = recordFoodRefund_(regSession, createdTeamId, [
+      { entitlementId: fixture.entitlementIds[0], amount: 50 },
+      { entitlementId: fixture.entitlementIds[1], amount: 0 }
+    ]);
+    assertEqual_(refunded.refundIds.length, 1, 'only the nonzero entry should create a REFUNDS row');
+
+    const refundRow = findRowById_('REFUNDS', 'RefundId', refunded.refundIds[0]);
+    assertEqual_(Number(refundRow.values.RefundAmount), 50, 'REFUNDS row should record the manually-entered amount, not a computed one');
+    assertEqual_(refundRow.values.TeamId, createdTeamId, 'REFUNDS row should belong to the right team');
+
+    const teamAfter = findRowById_('TEAMS', 'TeamId', createdTeamId);
+    assertEqual_(teamAfter.values.Status, 'REFUND_PROCESSING', 'team status should flip to REFUND_PROCESSING after a successful food refund');
+
+    let threwAlready = false;
+    try { recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 25 }]); } catch (err) { threwAlready = true; assertEqual_(err.code, 'ALREADY_REFUNDED', 'wrong code for refunding the same entitlement twice'); }
+    assertTrue_(threwAlready, 'recordFoodRefund_ should reject refunding the same entitlement twice');
+
+    let threwGated = false;
+    try { recordSecurityRefund_(regSession, createdTeamId, 100); } catch (err) { threwGated = true; assertEqual_(err.code, 'SECURITY_GATED_ON_NOC', 'wrong code before NOC is granted'); }
+    assertTrue_(threwGated, 'recordSecurityRefund_ should require NOC to be granted first');
+
+    // Grant NOC directly (bypassing real PDF generation — issueNoc_'s own Phase 6 test
+    // already covers that; this test only needs the status gate).
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+
+    const securityRefund = recordSecurityRefund_(regSession, createdTeamId, 100);
+    assertTrue_(!!securityRefund.securityRefundId, 'recordSecurityRefund_ should create a SECURITY_REFUNDS row');
+
+    let threwSecurityAlready = false;
+    try { recordSecurityRefund_(regSession, createdTeamId, 50); } catch (err) { threwSecurityAlready = true; assertEqual_(err.code, 'ALREADY_REFUNDED', 'wrong code for a second security refund on the same team'); }
+    assertTrue_(threwSecurityAlready, 'recordSecurityRefund_ should reject a second refund for the same team');
+
+    const overview = getDepartureOverview_(regSession, createdTeamId);
+    assertEqual_(overview.refunds.length, 1, 'overview should list the one food refund recorded');
+    assertEqual_(overview.securityRefunds.length, 1, 'overview should list the one security refund recorded');
+    assertEqual_(overview.nocStatus, 'NOC_GRANTED', 'overview should reflect the granted NOC');
+    assertTrue_(overview.entitlements.some(function (e) { return e.entitlementId === fixture.entitlementIds[0] && e.alreadyRefunded; }), 'overview should flag the refunded entitlement');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('REFUNDS', 'RefundId', r.RefundId); });
+      findRowsByField_('SECURITY_REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SECURITY_REFUNDS', 'SecurityRefundId', r.SecurityRefundId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1640,6 +1750,8 @@ const TEST_CASES = [
   { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, tier: 'pdf1' },
   { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
   { name: 'registration_getTeamDetail_redactsFinancialsForAccommodation', fn: test_registration_getTeamDetail_redactsFinancialsForAccommodation },
+  { name: 'departure_lockLifecycle', fn: test_departure_lockLifecycle },
+  { name: 'departure_fullRefundFlow', fn: test_departure_fullRefundFlow },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
