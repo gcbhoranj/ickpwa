@@ -819,3 +819,73 @@ finalized settlement" (§14) stays Phase 8's job, and Phase 7's own listed scope
 - **Frontend**: new `departure.js` — a Departure screen reached from Team Detail (Registration
   role only) via a new "Process Departure" button, showing the overview above plus the food-
   refund entry table and the security-refund action once NOC is granted.
+
+## 23. Phase 8 amendment — Settlement, Final Receipt, Relieving Order (decided 2026-08-20)
+
+Closes §17's Phase 8. Unlike Phase 7's refund amount, `SETTLEMENTS`' fields are fully
+derivable from data already in the sheets (a bookkeeping rollup, not a business-judgment
+call) — proposed to the human partner as concrete formulas and approved, rather than left
+unrecoverable:
+
+- `GrossMealCharges` = sum of the team's `FOOD_PACKAGES.Amount` (registration-time
+  `CHARGES.MealCharges` is always `0` in this codebase — `calculateCharges_` never populates
+  it; food charges live entirely in packages, Phase 4 onward). `GrossDariCharges` =
+  `CHARGES.DariCharges`. `GrossCharges` = the sum of those two.
+- `FoodRefund` = sum of the team's `REFUNDS.RefundAmount`. `NetCharges` = `GrossCharges −
+  FoodRefund`.
+- `SecurityCollected` = `CHARGES.SecurityCharges`. `SecurityRefunded` = the team's
+  `SECURITY_REFUNDS.Amount` (0 or 1 row, per Phase 7's one-per-team guard).
+- `OtherAdjustments`: manual optional entry at finalize time, defaults `0` — no other source
+  exists for it; consistent with Phase 7's "give Registration discretion" pattern rather than
+  inventing a rule for something the spec never enumerates (e.g. damage deductions).
+- `FinalBalance` = `FoodRefund + SecurityRefunded − OtherAdjustments` — the net amount owed
+  back to the team, since charges/security are fully collected upfront at registration/
+  purchase time and departure never collects additional money in this system.
+
+**One composite action, not a multi-step wizard** (decided for app-flow speed, per the human
+partner's explicit request): `finalizeDepartureAndGenerateDocuments_` computes and persists
+the `SETTLEMENTS` row (`Status: FINALIZED`), generates the Final Receipt PDF, generates the
+Relieving Order PDF, emails both together, releases the departure lock, and sets
+`TEAMS.Status → RELIEVED` — all inside one `LockService`-held call instead of the frontend
+driving five separate round trips. Gated on `ACCOMMODATION_NOC.Status === 'NOC_GRANTED'` (hard
+precondition — matches §14's departure-workflow ordering, NOC always precedes finalization)
+and the caller holding the departure lock (§22's `_requireDepartureLockHeldByCaller_`, reused
+unchanged). **Idempotent**: a `RECEIPTS` row with `Type: FINAL` already existing for the team
+means this departure was already fully finalized — returns the existing receipt/relieving IDs
+and PDF links without regenerating anything or re-sending the email (financial documents and
+an email send are exactly the kind of side effect that must never double-fire on a retry).
+
+- **Final Receipt reuses the existing "Temporary Receipt Template" file** (same A5-portrait
+  page size already manually resized once, back in Phase 3.5) rather than creating a second
+  template — `Type: FINAL` on the same `RECEIPTS` sheet, its own `_buildFinalReceiptLayout_`
+  content-builder. Shows the settlement figures above plus a new `AmountInWords` conversion
+  (`_numberToWordsIndian_` — Indian numbering, Lakh/Crore-capable, a well-defined algorithmic
+  task with no ambiguity to resolve).
+- **Relieving Order gets its own new template** (`createRelievingTemplate_`, mirrors
+  `createNocTemplate_`'s create-or-clear-in-place pattern exactly, registered as
+  `admin.bootstrap.createRelievingTemplate`) — `Session` (`AN`/`FN`, operator-selected,
+  rendered as "Afternoon"/"Forenoon") and `RelievingDate` are manual inputs at generation
+  time, incharge names/count pluralize the wording ("Incharge"/"Incharges") automatically.
+  Left at Slides' default landscape page size deliberately, same choice already made for
+  Phase 6's NOC certificate and never revisited — the layout uses proportional
+  (`pres.getPageWidth()/getPageHeight()`-relative) positioning throughout, so it renders
+  correctly at whatever the actual page size is; only the *coupon* grid layout genuinely
+  needed the one-time A4 portrait fix, since it alone has a fixed physical target size (3"×2"
+  cells).
+- **Signatures/seal** (explicitly Phase 8 scope, never consumed by any earlier phase despite
+  being seeded since Phase 1): a shared `_drawSignatureOrLine_` helper draws the real image if
+  `PrincipalSignatureFileId`/`RegistrationInchargeSignatureFileId`/`CollegeSealFileId` holds a
+  populated Drive file ID, else falls back to the existing text-signature-line convention
+  (matches the temp receipt) — nothing blocks on the human uploading real signature images.
+- **`DOCUMENTS`** gains one row each for the Final Receipt (`Type: FINAL_RECEIPT`) and
+  Relieving Order (`Type: RELIEVING_ORDER`), matching `CouponDocuments.gs`'s existing
+  registry pattern (`DIGITAL_COUPON` et al.) rather than inventing a new one.
+- **Email**: both PDFs attached together in one `GmailApp.sendEmail` call, `EMAIL_LOG` row
+  written, reusing `FoodPackages.gs`'s `_sendCouponEmail_`-established shape (default
+  recipients = every incharge with a non-blank email, never blocks the underlying workflow on
+  failure — `emailStatus` reported back but doesn't throw).
+- **Frontend**: extends the existing Departure screen (`departure.js`) — once NOC is granted,
+  adds a live settlement preview (computed client-side from `getDepartureOverview_`'s now-
+  extended response, so typing an Other-Adjustments value updates the shown Final Balance with
+  no extra round trip), the Other Adjustments field, a Session/date picker, and one "Finalize
+  & Send" button.
