@@ -995,7 +995,9 @@ outside, all fixed:
   two pre-existing `FinalDocuments.gs` tests (`departure_finalizeGeneratesDocumentsAndReliefsTeam`,
   `finalDocuments_emailFailureCapturesErrorMessage`) plus
   `registration_getTeamDetail_includesRelievingOrder`, all clean — a full `pdf2`-tier run was
-  also kicked off but ran long enough against the live script to outrun this session's own
-  patience for a single check; spot-checks above stand in for it. Service worker bumped to v30.
+  also attempted but timed out against the live script (the tier has grown past a single HTTP
+  round trip again now that it's 3 tests larger, same ceiling this project has already hit and
+  split around once before); spot-checks above stand in for it rather than a full-tier
+  re-split, which is out of scope here. Service worker bumped to v30.
 - Deployed to production Apps Script @144 (intermediate @143 was tests-only, deliberately
   deployed first to capture the live RED before touching implementation).
