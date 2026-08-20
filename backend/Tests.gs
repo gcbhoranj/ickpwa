@@ -1316,6 +1316,35 @@ function test_e2e_fullTeamLifecycle() {
   }
 }
 
+function test_settings_tournamentInfo_updateAndValidate() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'a' };
+  const regSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'r' };
+  const before = getTournamentInfo_(adminSession);
+  try {
+    let threwForbidden = false;
+    try { updateTournamentInfo_(regSession, before); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Admin caller'); }
+    assertTrue_(threwForbidden, 'updateTournamentInfo_ should reject non-Admin callers');
+
+    let threwBadDate = false;
+    try {
+      updateTournamentInfo_(adminSession, {
+        tournamentName: 'Test Tournament', organizerName: 'Test College', districtAddress: 'Test District',
+        tournamentStartDate: '2026-09-25', tournamentEndDate: '2026-09-21'
+      });
+    } catch (err) { threwBadDate = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for start date after end date'); }
+    assertTrue_(threwBadDate, 'updateTournamentInfo_ should reject a start date after the end date');
+
+    const updated = updateTournamentInfo_(adminSession, {
+      tournamentName: 'E2E Test Tournament Name', organizerName: 'E2E Test Organizer', districtAddress: 'E2E Test District',
+      tournamentStartDate: '2026-09-21', tournamentEndDate: '2026-09-25'
+    });
+    assertEqual_(updated.tournamentName, 'E2E Test Tournament Name', 'updateTournamentInfo_ should persist the new tournament name');
+    assertEqual_(getTournamentInfo_(adminSession).organizerName, 'E2E Test Organizer', 'getTournamentInfo_ should read back the updated organizer name');
+  } finally {
+    updateTournamentInfo_(adminSession, before);
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1995,6 +2024,7 @@ const TEST_CASES = [
   { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
   { name: 'reports_getAll_adminOnlyAndAggregatesTeamCorrectly', fn: test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly },
   { name: 'reports_auditLog_scopesToOwnActionsForNonAdmin', fn: test_reports_auditLog_scopesToOwnActionsForNonAdmin },
+  { name: 'settings_tournamentInfo_updateAndValidate', fn: test_settings_tournamentInfo_updateAndValidate },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },

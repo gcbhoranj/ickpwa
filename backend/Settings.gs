@@ -90,6 +90,39 @@ function updateMealTimings_(actorSession, timings) {
   return getMealTimings_(actorSession);
 }
 
+// Tournament Name/Organizer/District Address/dates — seeded once by seedSettings_ (Phase 1),
+// but until now had no update action at all: only editable via a raw Sheet edit or a reseed
+// (which never overwrites an already-set value). Flagged as a gap during Phase 10 QA.
+function getTournamentInfo_(actorSession) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  return {
+    tournamentName: getSetting_('TournamentName', ''), organizerName: getSetting_('OrganizerName', ''),
+    districtAddress: getSetting_('DistrictAddress', ''),
+    tournamentStartDate: getSetting_('TournamentStartDate', ''), tournamentEndDate: getSetting_('TournamentEndDate', '')
+  };
+}
+
+function updateTournamentInfo_(actorSession, info) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  if (!info || !info.tournamentName) throw apiError_('VALIDATION_ERROR', 'Tournament name is required.');
+  if (!info.organizerName) throw apiError_('VALIDATION_ERROR', 'Organizer/College name is required.');
+  if (!info.districtAddress) throw apiError_('VALIDATION_ERROR', 'District address is required.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(info.tournamentStartDate || '')) throw apiError_('VALIDATION_ERROR', 'Tournament start date must be YYYY-MM-DD.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(info.tournamentEndDate || '')) throw apiError_('VALIDATION_ERROR', 'Tournament end date must be YYYY-MM-DD.');
+  if (info.tournamentStartDate > info.tournamentEndDate) throw apiError_('VALIDATION_ERROR', 'Tournament start date must be on or before the end date.');
+
+  setSetting_('TournamentName', info.tournamentName, actorSession.userId);
+  setSetting_('OrganizerName', info.organizerName, actorSession.userId);
+  setSetting_('DistrictAddress', info.districtAddress, actorSession.userId);
+  setSetting_('TournamentStartDate', info.tournamentStartDate, actorSession.userId);
+  setSetting_('TournamentEndDate', info.tournamentEndDate, actorSession.userId);
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: new Date().toISOString(), UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'UPDATE_TOURNAMENT_INFO', Entity: 'SETTINGS', EntityId: 'TOURNAMENT_INFO', PreviousState: '', NewState: JSON.stringify(info)
+  });
+  return getTournamentInfo_(actorSession);
+}
+
 function setFinancialLock_(actorSession, locked) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   const now = new Date().toISOString();

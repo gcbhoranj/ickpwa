@@ -302,6 +302,14 @@ const ACTIONS = {
   'reports.auditLog': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return { entries: getAuditLog_(session, payload.limit) };
+  },
+  'admin.settings.getTournamentInfo': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getTournamentInfo_(session);
+  },
+  'admin.settings.updateTournamentInfo': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return updateTournamentInfo_(session, payload);
   }
 };
 
