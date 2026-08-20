@@ -252,6 +252,7 @@ async function renderTeamDetail(root, user, teamId) {
         : '') +
       (user.role !== 'ACCOMMODATION' ? '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' : '') +
       (user.role === 'ACCOMMODATION' ? '<button id="noc-btn" style="margin-top:12px">Accommodation NOC</button>' : '') +
+      (user.role === 'REGISTRATION' ? '<button id="departure-btn" style="margin-top:12px">Process Departure</button>' : '') +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
   if (document.getElementById('packages-btn')) {
@@ -262,6 +263,11 @@ async function renderTeamDetail(root, user, teamId) {
   if (document.getElementById('noc-btn')) {
     document.getElementById('noc-btn').addEventListener('click', function () {
       navigateTo(renderNocScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
+    });
+  }
+  if (document.getElementById('departure-btn')) {
+    document.getElementById('departure-btn').addEventListener('click', function () {
+      navigateTo(renderDepartureScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
     });
   }
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
