@@ -311,9 +311,14 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, mealIncl
 function listPackages_(actorSession, teamId) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   return findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId).map(function (p) {
+    // Which meals this package actually covers — a plain date range is no longer enough to
+    // tell, now that a package can exclude a meal entirely (spec §20-late-arrival amendment).
+    const mealsPresent = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', p.PackageId).map(function (e) { return e.Meal; });
+    const mealsLabel = ['DINNER', 'BREAKFAST', 'LUNCH'].filter(function (m) { return mealsPresent.indexOf(m) !== -1; })
+      .map(function (m) { return m.charAt(0) + m.slice(1).toLowerCase(); }).join(' + ');
     return {
       packageId: p.PackageId, packageNumber: Number(p.PackageNumber), eligiblePersons: Number(p.EligiblePersons),
-      amount: Number(p.Amount), startMeal: p.StartMeal, endMeal: p.EndMeal, status: p.Status,
+      amount: Number(p.Amount), startMeal: p.StartMeal, endMeal: p.EndMeal, status: p.Status, mealsLabel: mealsLabel,
       digitalCouponUrl: p.DigitalCouponPdfFileId ? 'https://drive.google.com/file/d/' + p.DigitalCouponPdfFileId + '/view' : '',
       printedCouponUrl: p.PrintedCouponPdfFileId ? 'https://drive.google.com/file/d/' + p.PrintedCouponPdfFileId + '/view' : '',
       emailStatus: p.EmailStatus
