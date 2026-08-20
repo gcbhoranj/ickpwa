@@ -826,3 +826,30 @@ only, no backend changes.
   (`_packageRowFromPurchaseResult_`, Phase 4) — untouched.
 - **Testing**: frontend-only, no automated coverage (this project's existing convention) —
   syntax-checked, diff-reviewed line by line. Service worker bumped to v27.
+
+## 2026-08-20 — Post-launch feedback, Group C: coupon email investigation
+
+Third sub-project. Diagnosed live (no login credentials available for the reset production
+system) via a new read-only `system.diagEmailLog` action — same no-session convention as the
+existing `system.diagQrMatrix`/`diagCouponTemplateSizes` — reading real `EMAIL_LOG` rows from
+the human partner's own UAT test, which the recent production reset had not yet cleared.
+
+- **Root cause: Gmail OAuth authorization gap, not a code bug, and not coupon-specific** — both
+  the coupon email (Phase 4) and the Final Documents email (Phase 8) are failing with `"The
+  script does not have permission to perform that action. Required permissions:
+  (...gmail.send...)"`. Exactly the scenario this project's own README "Known Gotchas" already
+  documents (a new/changed Google service scope needs a one-time manual consent click-through
+  by the script owner) — not something fixable in code. Flagged to the human partner directly;
+  re-authorization requires `gcbhoranj@gmail.com` access in the Apps Script editor.
+- **Separate real bug found and fixed while diagnosing**: `finalizeDepartureAndGenerateDocuments_`
+  (`FinalDocuments.gs`) discarded the actual Gmail exception on failure — always wrote
+  `EMAIL_LOG.ErrorMessage: ''` — unlike `FoodPackages.gs`'s `_sendCouponEmail_`, which correctly
+  captures `err.message`. This is exactly why the coupon failure was diagnosable and the Final
+  Documents failure wasn't, side by side in the same sheet. Now captures `err.message` the same
+  way. New regression test (`finalDocuments_emailFailureCapturesErrorMessage`) watched fail
+  live against the still-broken Gmail auth (a real natural RED, not fabricated), then verified
+  green after the fix — confirmed via the diagnostic action itself: pre-fix log rows have a
+  blank `ErrorMessage`, post-fix rows show the real permission error.
+- **Status at time of writing**: Gmail authorization still not re-granted as of the last check
+  — every email send (coupon and Final Documents alike) is still `FAILED`. Needs the human
+  partner's one-time consent click-through before this is fully closed.

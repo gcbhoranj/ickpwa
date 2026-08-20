@@ -45,6 +45,19 @@ const ACTIONS = {
     const qr = qrEncode_(token);
     return { token: token, size: qr.size, matrix: qr.matrix };
   },
+  // Read-only diagnostic for the reported "coupon emails aren't reaching incharges" issue —
+  // no session needed (same convention as the other system.diag* actions), reads real
+  // EMAIL_LOG rows so the actual Status/ErrorMessage from a real send attempt is visible
+  // without needing to log in as a committee user. `payload.limit` caps how many of the most
+  // recent rows come back (default 20).
+  'system.diagEmailLog': function (payload) {
+    const rows = rowsToObjects_('EMAIL_LOG');
+    const limit = (payload && payload.limit) || 20;
+    const recent = rows.slice(Math.max(0, rows.length - limit));
+    const byStatus = {};
+    rows.forEach(function (r) { byStatus[r.Status] = (byStatus[r.Status] || 0) + 1; });
+    return { totalRows: rows.length, countsByStatus: byStatus, recent: recent };
+  },
   'system.diagCouponTemplateSizes': function () {
     const templatesFolder = _ensureSubfolder_(_getRootFolder_(), 'Templates');
     function sizeOf(name) {

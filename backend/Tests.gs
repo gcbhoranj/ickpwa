@@ -1263,6 +1263,51 @@ function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
   }
 }
 
+// Regression test for a real production bug (2026-08-20, from a live UAT report): the email
+// try/catch in finalizeDepartureAndGenerateDocuments_ always wrote EMAIL_LOG.ErrorMessage: ''
+// on failure, discarding the real Gmail exception — unlike FoodPackages.gs's
+// _sendCouponEmail_, which correctly captures err.message. That gap is exactly what made this
+// bug report hard to diagnose (a genuine live Gmail-authorization failure showed up with a
+// blank ErrorMessage here, while the parallel coupon-email failure showed the real reason).
+// This project has no mocking for Google services (see this file's own header comment) — the
+// email send here is real, so this only asserts the invariant that must hold regardless of
+// whether the send actually succeeds or fails at the moment this runs.
+function test_finalDocuments_emailFailureCapturesErrorMessage() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 3);
+    createdTeamId = fixture.teamId;
+    initiateDeparture_(regSession, createdTeamId);
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+
+    const emailLogRow = findRowsByField_('EMAIL_LOG', 'DocumentId', finalized.receiptId)[0];
+    assertTrue_(!!emailLogRow, 'finalize should log an EMAIL_LOG row when recipients were supplied');
+    if (emailLogRow.Status === 'FAILED') {
+      assertTrue_(!!emailLogRow.ErrorMessage, 'a FAILED email send must capture the real error message, not leave it blank');
+    }
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 function test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'y' };
@@ -2177,6 +2222,7 @@ const TEST_CASES = [
   { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' },
   { name: 'accommodation_issueNoc_autoVacatesRooms', fn: test_accommodation_issueNoc_autoVacatesRooms, tier: 'pdf2' },
   { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' },
+  { name: 'finalDocuments_emailFailureCapturesErrorMessage', fn: test_finalDocuments_emailFailureCapturesErrorMessage, tier: 'pdf2' },
   // Phase 10: full cross-module lifecycle, 6 real PDF generations — own tier so it never
   // competes with pdf1/pdf2's own budget against the 6-minute ceiling.
   { name: 'e2e_fullTeamLifecycle', fn: test_e2e_fullTeamLifecycle, tier: 'e2e' }

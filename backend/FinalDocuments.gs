@@ -328,6 +328,7 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
       recipients = incharges.map(function (i) { return i.EmailAddress; }).filter(function (e) { return !!e; });
     }
     let emailStatus = 'NOT_SENT';
+    let emailErrorMessage = '';
     if (recipients.length > 0) {
       const subject = 'Final Documents — ' + team.values.RegistrationNumber;
       const body = 'Please find attached your Final Receipt and Relieving Order.';
@@ -339,10 +340,11 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
         emailStatus = 'SENT';
       } catch (err) {
         emailStatus = 'FAILED';
+        emailErrorMessage = err.message;
       }
       appendRow_('EMAIL_LOG', {
         EmailId: nextId_('EML', 4), DocumentId: receiptId, Recipient: recipients.join(','), Subject: subject,
-        SentAt: nowIso, User: actorSession.userId, Status: emailStatus, ErrorMessage: ''
+        SentAt: nowIso, User: actorSession.userId, Status: emailStatus, ErrorMessage: emailErrorMessage
       });
     }
 
