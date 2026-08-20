@@ -75,11 +75,41 @@ function _resolveInchargeMealSelections_(incharges, inchargeMealSelections) {
   });
 }
 
-function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDate, mode, recipientEmails) {
+// Reconstructs purchasePackage_'s response shape from an already-existing FOOD_PACKAGES row
+// — used both for an idempotent replay (isReplay=true) and could be reused anywhere else a
+// package needs to be described in this shape.
+function _packageResponseFromExistingRow_(pkgRow, isReplay) {
+  const team = findRowById_('TEAMS', 'TeamId', pkgRow.TeamId);
+  return {
+    packageId: pkgRow.PackageId, packageNumber: Number(pkgRow.PackageNumber), couponId: pkgRow.CouponId,
+    eligiblePersons: Number(pkgRow.EligiblePersons), amount: Number(pkgRow.Amount),
+    startMeal: pkgRow.StartMeal, endMeal: pkgRow.EndMeal, collegeName: team ? team.values.CollegeName : '',
+    digitalCouponUrl: pkgRow.DigitalCouponPdfFileId ? 'https://drive.google.com/file/d/' + pkgRow.DigitalCouponPdfFileId + '/view' : '',
+    printedCouponUrl: pkgRow.PrintedCouponPdfFileId ? 'https://drive.google.com/file/d/' + pkgRow.PrintedCouponPdfFileId + '/view' : '',
+    emailStatus: pkgRow.EmailStatus, digitalCouponFileId: pkgRow.DigitalCouponPdfFileId, printedCouponFileId: pkgRow.PrintedCouponPdfFileId,
+    replay: !!isReplay
+  };
+}
+
+// clientRequestId (optional): closes a real, live-confirmed bug (2026-08-20) — the frontend's
+// documented retry-on-transient-glitch behavior (api-client.js) re-sends the exact same
+// request body, including the same requestId, if Apps Script's response redirect isn't ready
+// yet; without a guard here that silently created a second real package (own coupon/QR/
+// charge) for one purchase. A repeated clientRequestId returns the ORIGINAL package instead —
+// this alone is what closes the gap, since a date-overlap check can't: the retry's own
+// rolling default-date computation sees the just-created package and picks the NEXT
+// (non-overlapping) date, not the same one. The separate overlap check below catches the
+// different case of a genuinely duplicate sale attempt (different requestId).
+function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDate, mode, recipientEmails, clientRequestId) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
   if (!mode) throw apiError_('VALIDATION_ERROR', 'Payment mode is required.');
+
+  if (clientRequestId) {
+    const existingByRequestId = findRowsByField_('FOOD_PACKAGES', 'ClientRequestId', clientRequestId)[0];
+    if (existingByRequestId) return _packageResponseFromExistingRow_(existingByRequestId, true);
+  }
 
   const teamMembers = Number(team.values.NumberOfTeamMembers);
   const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', teamId);
@@ -98,90 +128,126 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
   const eligiblePersons = teamMembers + includedIncharges.length;
   if (eligiblePersons < 1) throw apiError_('VALIDATION_ERROR', 'Eligible persons must be at least 1.');
 
-  const existingPackages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
-  const packageNumber = existingPackages.length + 1;
-  const startDate = _defaultPackageDinnerDate_(teamId, dinnerDate);
-  const endDate = _addDays_(startDate, 1);
-
   const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
   const rateLunch = Number(getSetting_('RateLunch', '0'));
   const rateDinner = Number(getSetting_('RateDinner', '0'));
   const amount = rateDinner * dinnerEligible + rateBreakfast * breakfastEligible + rateLunch * lunchEligible;
 
-  const packageId = nextId_('PKG', 4);
-  const couponId = nextId_('CPN', 4);
-  // Opaque, unguessable, but deliberately shorter than a full UUID (36 chars): QR module
-  // count grows with encoded data length, and a full UUID pushed every coupon's QR into a
-  // version with ~840 modules — hundreds of individual shapes, a measured, live-confirmed
-  // contributor to slow document generation (see this file's header note). 12 hex characters
-  // (48 bits, ~2.8×10^14 possibilities) is still astronomically unguessable at the scale of
-  // a few hundred coupons for one tournament, and fits the smallest QR version.
-  const qrToken = Utilities.getUuid().replace(/-/g, '').substring(0, 12);
-  const now = new Date().toISOString();
+  // The lock covers only the decide-and-write critical section (packageNumber assignment,
+  // the overlap check, and every row write below) — NOT the PDF generation/email that
+  // follows, which takes tens of seconds and doesn't touch any shared counter, so holding a
+  // script-wide lock across it would needlessly stall every other concurrent purchase.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let packageId, couponId, qrToken, now, packageNumber, startDate, endDate;
+  try {
+    if (clientRequestId) {
+      const existingByRequestId2 = findRowsByField_('FOOD_PACKAGES', 'ClientRequestId', clientRequestId)[0];
+      if (existingByRequestId2) return _packageResponseFromExistingRow_(existingByRequestId2, true);
+    }
 
-  appendRow_('FOOD_PACKAGES', {
-    PackageId: packageId, TeamId: teamId, PackageNumber: packageNumber, CouponId: couponId,
-    IncludeInchargesInEntitlement: includedIncharges.length > 0 ? 'true' : 'false', EligiblePersons: eligiblePersons,
-    PurchaseDateTime: now, Amount: amount, RateBreakfastSnapshot: rateBreakfast, RateLunchSnapshot: rateLunch,
-    RateDinnerSnapshot: rateDinner, StartMeal: startDate, EndMeal: endDate, Status: 'ACTIVE', QrToken: qrToken,
-    DigitalCouponPdfFileId: '', PrintedCouponPdfFileId: '', EmailStatus: 'NOT_SENT',
-    CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
-  });
+    const existingPackages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
+    packageNumber = existingPackages.length + 1;
+    startDate = _defaultPackageDinnerDate_(teamId, dinnerDate);
+    endDate = _addDays_(startDate, 1);
 
-  appendRow_('FOOD_COUPONS', {
-    CouponId: couponId, PackageId: packageId, TeamId: teamId, QrToken: qrToken, Status: 'ACTIVE', IssuedAt: now
-  });
+    // Reject a genuine duplicate sale: any ACTIVE package for this team whose actual meal
+    // slots collide with the one being purchased now. NOT a plain date-range overlap — every
+    // legitimate rolling package deliberately SHARES a boundary calendar date with the next
+    // one (Package 2's Dinner lands the same day as Package 1's Breakfast/Lunch — different
+    // meals, same date; "rolling coverage continuous with no gaps" is the whole point). A
+    // naive [StartMeal,EndMeal] range-overlap check flags that legitimate continuation as a
+    // false positive (caught live by this file's own regression test before shipping — see
+    // dev-log). The real collision condition, given every package is always exactly Dinner
+    // on its StartMeal + Breakfast/Lunch on its EndMeal: this package's Dinner falls on an
+    // existing package's Dinner date, or this package's Breakfast/Lunch falls on an existing
+    // package's Breakfast/Lunch date.
+    const overlapping = existingPackages.filter(function (p) {
+      return p.Status === 'ACTIVE' && (startDate === p.StartMeal || endDate === p.EndMeal);
+    })[0];
+    if (overlapping) {
+      throw apiError_('DUPLICATE_PACKAGE',
+        'This package has already been sold to ' + team.values.CollegeName + ' (Package ' +
+        overlapping.PackageNumber + ', ' + overlapping.StartMeal + ' to ' + overlapping.EndMeal + ').');
+    }
 
-  // One row per incharge on the team (not just the included ones) — a complete record of
-  // who was asked and what they chose, per package.
-  if (incharges.length > 0) {
-    const pimIds = nextIdBatch_('PIM', resolvedSelections.length, 4);
-    appendRows_('PACKAGE_INCHARGE_MEALS', resolvedSelections.map(function (s, i) {
+    packageId = nextId_('PKG', 4);
+    couponId = nextId_('CPN', 4);
+    // Opaque, unguessable, but deliberately shorter than a full UUID (36 chars): QR module
+    // count grows with encoded data length, and a full UUID pushed every coupon's QR into a
+    // version with ~840 modules — hundreds of individual shapes, a measured, live-confirmed
+    // contributor to slow document generation (see this file's header note). 12 hex
+    // characters (48 bits, ~2.8×10^14 possibilities) is still astronomically unguessable at
+    // the scale of a few hundred coupons for one tournament, and fits the smallest QR version.
+    qrToken = Utilities.getUuid().replace(/-/g, '').substring(0, 12);
+    now = new Date().toISOString();
+
+    appendRow_('FOOD_PACKAGES', {
+      PackageId: packageId, TeamId: teamId, PackageNumber: packageNumber, CouponId: couponId,
+      IncludeInchargesInEntitlement: includedIncharges.length > 0 ? 'true' : 'false', EligiblePersons: eligiblePersons,
+      PurchaseDateTime: now, Amount: amount, RateBreakfastSnapshot: rateBreakfast, RateLunchSnapshot: rateLunch,
+      RateDinnerSnapshot: rateDinner, StartMeal: startDate, EndMeal: endDate, Status: 'ACTIVE', QrToken: qrToken,
+      DigitalCouponPdfFileId: '', PrintedCouponPdfFileId: '', EmailStatus: 'NOT_SENT', ClientRequestId: clientRequestId || '',
+      CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
+    });
+
+    appendRow_('FOOD_COUPONS', {
+      CouponId: couponId, PackageId: packageId, TeamId: teamId, QrToken: qrToken, Status: 'ACTIVE', IssuedAt: now
+    });
+
+    // One row per incharge on the team (not just the included ones) — a complete record of
+    // who was asked and what they chose, per package.
+    if (incharges.length > 0) {
+      const pimIds = nextIdBatch_('PIM', resolvedSelections.length, 4);
+      appendRows_('PACKAGE_INCHARGE_MEALS', resolvedSelections.map(function (s, i) {
+        return {
+          PackageInchargeMealId: pimIds[i], PackageId: packageId, InchargeId: s.inchargeId, InchargeName: s.inchargeName,
+          IncludeBreakfast: s.breakfast ? 'true' : 'false', IncludeLunch: s.lunch ? 'true' : 'false',
+          IncludeDinner: s.dinner ? 'true' : 'false', CreatedBy: actorSession.userId, CreatedAt: now
+        };
+      }));
+    }
+
+    const meals = [
+      { meal: 'DINNER', date: startDate, rate: rateDinner, eligiblePersons: dinnerEligible },
+      { meal: 'BREAKFAST', date: endDate, rate: rateBreakfast, eligiblePersons: breakfastEligible },
+      { meal: 'LUNCH', date: endDate, rate: rateLunch, eligiblePersons: lunchEligible }
+    ];
+    const entitlementIds = nextIdBatch_('ENT', meals.length, 4);
+    appendRows_('MEAL_ENTITLEMENTS', meals.map(function (m, i) {
       return {
-        PackageInchargeMealId: pimIds[i], PackageId: packageId, InchargeId: s.inchargeId, InchargeName: s.inchargeName,
-        IncludeBreakfast: s.breakfast ? 'true' : 'false', IncludeLunch: s.lunch ? 'true' : 'false',
-        IncludeDinner: s.dinner ? 'true' : 'false', CreatedBy: actorSession.userId, CreatedAt: now
+        EntitlementId: entitlementIds[i], PackageId: packageId, TeamId: teamId, Date: m.date, Meal: m.meal,
+        Rate: m.rate, EligiblePersons: m.eligiblePersons, ServedPersons: 0, RemainingPersons: m.eligiblePersons,
+        RefundablePersons: '', RefundableAmount: '', MealOrderStatus: 'NOT_ORDERED',
+        ValidFrom: m.date, ValidUntil: m.date, Status: 'ACTIVE'
       };
     }));
+
+    // One printed coupon per eligible person — a real college contingent can run 15-25+
+    // people, so this is built as ONE bulk id-allocation + ONE bulk row-write (not N of
+    // each); see nextIdBatch_/appendRows_ headers for why that matters at this scale.
+    const printedCouponIds = nextIdBatch_('PRC', eligiblePersons, 4);
+    appendRows_('PRINTED_COUPONS', printedCouponIds.map(function (id, i) {
+      const seq = i + 1;
+      return {
+        PrintedCouponId: id, CouponId: couponId, PackageId: packageId, SequenceNumber: seq,
+        TotalCount: String(seq).padStart(2, '0') + '/' + String(eligiblePersons).padStart(2, '0'),
+        PrintBatchId: 1, GeneratedAt: now, GeneratedBy: actorSession.userId
+      };
+    }));
+
+    appendRow_('PAYMENTS', {
+      PaymentId: nextId_('PAY', 4), TeamId: teamId, Amount: amount, Mode: mode, ReceivedAt: now,
+      Purpose: 'ADDITIONAL_PACKAGE', ReversalOf: '', CreatedBy: actorSession.userId, CreatedAt: now
+    });
+
+    appendRow_('AUDIT_LOG', {
+      AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+      Action: 'PURCHASE_PACKAGE', Entity: 'PACKAGE', EntityId: packageId, PreviousState: '', NewState: 'ACTIVE'
+    });
+  } finally {
+    lock.releaseLock();
   }
-
-  const meals = [
-    { meal: 'DINNER', date: startDate, rate: rateDinner, eligiblePersons: dinnerEligible },
-    { meal: 'BREAKFAST', date: endDate, rate: rateBreakfast, eligiblePersons: breakfastEligible },
-    { meal: 'LUNCH', date: endDate, rate: rateLunch, eligiblePersons: lunchEligible }
-  ];
-  const entitlementIds = nextIdBatch_('ENT', meals.length, 4);
-  appendRows_('MEAL_ENTITLEMENTS', meals.map(function (m, i) {
-    return {
-      EntitlementId: entitlementIds[i], PackageId: packageId, TeamId: teamId, Date: m.date, Meal: m.meal,
-      Rate: m.rate, EligiblePersons: m.eligiblePersons, ServedPersons: 0, RemainingPersons: m.eligiblePersons,
-      RefundablePersons: '', RefundableAmount: '', MealOrderStatus: 'NOT_ORDERED',
-      ValidFrom: m.date, ValidUntil: m.date, Status: 'ACTIVE'
-    };
-  }));
-
-  // One printed coupon per eligible person — a real college contingent can run 15-25+
-  // people, so this is built as ONE bulk id-allocation + ONE bulk row-write (not N of each);
-  // see nextIdBatch_/appendRows_ headers for why that matters at this scale.
-  const printedCouponIds = nextIdBatch_('PRC', eligiblePersons, 4);
-  appendRows_('PRINTED_COUPONS', printedCouponIds.map(function (id, i) {
-    const seq = i + 1;
-    return {
-      PrintedCouponId: id, CouponId: couponId, PackageId: packageId, SequenceNumber: seq,
-      TotalCount: String(seq).padStart(2, '0') + '/' + String(eligiblePersons).padStart(2, '0'),
-      PrintBatchId: 1, GeneratedAt: now, GeneratedBy: actorSession.userId
-    };
-  }));
-
-  appendRow_('PAYMENTS', {
-    PaymentId: nextId_('PAY', 4), TeamId: teamId, Amount: amount, Mode: mode, ReceivedAt: now,
-    Purpose: 'ADDITIONAL_PACKAGE', ReversalOf: '', CreatedBy: actorSession.userId, CreatedAt: now
-  });
-
-  appendRow_('AUDIT_LOG', {
-    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
-    Action: 'PURCHASE_PACKAGE', Entity: 'PACKAGE', EntityId: packageId, PreviousState: '', NewState: 'ACTIVE'
-  });
 
   const couponData = _buildCouponDisplayData_(team.values, packageNumber, eligiblePersons, startDate, endDate, couponId, qrToken);
   const digitalPdf = _generateDigitalCouponPdf_(actorSession, packageId, couponData);

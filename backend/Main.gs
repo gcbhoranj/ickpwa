@@ -195,9 +195,9 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return allocateRoom_(session, payload.teamId, payload.roomId, payload.personsAllocated, payload.kind);
   },
-  'registration.package.purchase': function (payload, sessionId) {
+  'registration.package.purchase': function (payload, sessionId, requestId) {
     const session = requireSession_(sessionId);
-    return purchasePackage_(session, payload.teamId, payload.inchargeMealSelections, payload.dinnerDate, payload.mode, payload.recipientEmails);
+    return purchasePackage_(session, payload.teamId, payload.inchargeMealSelections, payload.dinnerDate, payload.mode, payload.recipientEmails, requestId);
   },
   'registration.package.list': function (payload, sessionId) {
     const session = requireSession_(sessionId);

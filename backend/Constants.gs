@@ -36,7 +36,7 @@ const SHEET_SCHEMAS = {
     'IncludeInchargesInEntitlement', 'EligiblePersons', 'PurchaseDateTime', 'Amount',
     'RateBreakfastSnapshot', 'RateLunchSnapshot', 'RateDinnerSnapshot', 'StartMeal', 'EndMeal',
     'Status', 'QrToken', 'DigitalCouponPdfFileId', 'PrintedCouponPdfFileId', 'EmailStatus',
-    'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
+    'ClientRequestId', 'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
   FOOD_COUPONS: ['CouponId', 'PackageId', 'TeamId', 'QrToken', 'Status', 'IssuedAt'],
   // One row per incharge on the team, written at purchase time regardless of whether they
   // opted into any meal (a complete audit trail of who was asked and what they chose, not
