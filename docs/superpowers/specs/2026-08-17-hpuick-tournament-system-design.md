@@ -705,3 +705,65 @@ shape (§6): session/role check, lock where the action touches `ServedPersons`/
 Today's Summary, Teams. The Teams/Team-Detail/Packages path reuses `registration.js`'s
 `renderTeamsList`/`renderTeamDetail` and `packages.js`'s `renderPackagesScreen` unchanged,
 called from the Mess dashboard instead of the Registration one.
+
+## 21. Phase 6 amendment — Accommodation: reallocate, vacate, NOC issuance (decided 2026-08-20)
+
+Phase 3.5 (§19) deliberately narrowed Accommodation to allocate-only; this closes the rest of
+§17's Phase 6 scope. Two decisions made with the human partner before writing this phase's
+plan:
+
+- **Allocation stays per-team/per-incharge**, not per-team-member. `ACCOMMODATION` rows
+  continue to represent a block of persons in a room, not one row per student — nothing in
+  real use so far has needed individual student-level room tracking, and splitting to that
+  grain would be pure speculative complexity (YAGNI). Reallocate/vacate operate on existing
+  allocation rows at that same grain.
+- **NOC issuance is both the status flip the schema already defines *and* a generated
+  certificate PDF** — `ACCOMMODATION_NOC` (§5, specified but never created by `setupSchema`
+  until now) gates Phase 7's security refund exactly as designed (`PENDING`→`NOC_GRANTED`),
+  and granting it also produces a one-page PDF certificate for the incharge to carry, via the
+  same Slides-copy-and-render pattern `Receipts.gs` already uses for the temporary receipt.
+  `ACCOMMODATION_NOC` gains one field beyond its original spec: `PdfFileId`.
+
+**Backend (`Accommodation.gs`):**
+- `vacateRoom_(actorSession, allocationId)` — role `ACCOMMODATION`. Marks the allocation
+  `Status: VACATED`, `VacatedAt: now`; if the room was `FULL`, flips it back to `AVAILABLE`
+  (mirrors `allocateRoom_`'s inverse: it flips `AVAILABLE→FULL` when an allocation fills the
+  last space, so vacating must be able to undo that). Rejects an already-`VACATED` row
+  (`ALREADY_VACATED`).
+- `reallocateRoom_(actorSession, allocationId, newRoomId)` — role `ACCOMMODATION`. Internally
+  vacates the existing row (via the same logic as `vacateRoom_`) then allocates the same
+  `PersonsAllocated`/`TeamId`/`SubjectType` into `newRoomId`, reusing `allocateRoom_`'s
+  existing capacity/room-type checks rather than duplicating them — implemented as vacate +
+  allocate composed together, not a third parallel code path.
+- `listActiveAccommodation_(actorSession, kind)` — role `ADMIN`/`REGISTRATION`/
+  `ACCOMMODATION`. Active (`Status: ALLOCATED`) allocations joined with team/room info, so the
+  Rooms/Teams screens have something to reallocate/vacate *from* (today's `Accommodation.gs`
+  only ever looked at *pending* need, never listed existing allocations back out).
+
+**New backend module `Noc.gs`**, actions registered in `Main.gs` under `accommodation.*`:
+- `getNocStatus_(actorSession, teamId)` — current `ACCOMMODATION_NOC` row for a team, or a
+  synthetic `PENDING`/no-row-yet state if none exists.
+- `issueNoc_(actorSession, teamId)` — role `ACCOMMODATION`. Creates the `ACCOMMODATION_NOC`
+  row if absent (or rejects `ALREADY_GRANTED` if one already has `Status: NOC_GRANTED` —
+  idempotent-safe, matching every other one-shot document action in this codebase), sets
+  `Status: NOC_GRANTED`, generates the certificate PDF (team/college name, date, issuing
+  Accommodation user, signature line — same fields-per-line layout technique as
+  `_buildReceiptLayout_`, its own `_buildNocLayout_`), stores `PdfFileId`.
+- `createNocTemplate_(actorSession, force)` — role `ADMIN`, mirrors
+  `createTemporaryReceiptTemplate_` exactly (one-time blank template + manual page-size
+  resize step); registered as a new `admin.bootstrap.createNocTemplate` action alongside the
+  existing `createReceiptTemplate`.
+
+**Schema:** `ACCOMMODATION_NOC` (`NocId, TeamId, Status, IssuedBy, IssuedAt, Notes,
+PdfFileId`) added to `setupSchema`'s tab list — idempotent like every other tab there, safe to
+re-run on the live production Sheet.
+
+**Frontend (`accommodation.js`):** Rooms/Teams screens' existing allocation rows gain
+Reallocate (pick a new room from the same room-type list already fetched for allocation) and
+Vacate buttons. New **NOC** screen (completing the spec's 3-screen Accommodation nav, §13):
+search/list teams with their current NOC status, a Grant NOC action, and a link to the
+generated PDF once granted.
+
+**Testing:** new `accom` self-test tier (matching the `mess`/`pdf1`/`pdf2` tier-split
+pattern established in Phase 5) — live vacate, reallocate, and NOC-issuance-with-PDF flows
+against the real deployed backend.
