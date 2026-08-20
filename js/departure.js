@@ -8,7 +8,7 @@ function _renderFinalizeSection(overview) {
   const today = new Date().toISOString().slice(0, 10);
   return (
     '<h2 style="margin-top:16px">Finalize & Send</h2>' +
-    '<p>Gross Charges: Rs ' + p.grossCharges + ' &middot; Net Charges: Rs ' + p.netCharges + '</p>' +
+    '<p>Gross Food/Dari Charges: Rs ' + p.grossCharges + ' &middot; Net Charges (after food refund only — security is separate below): Rs ' + p.netCharges + '</p>' +
     '<label>Other Adjustments<input type="number" id="other-adjustments" value="0"></label>' +
     '<p id="final-balance-preview">Final Balance (refunded to team): Rs ' + (p.foodRefund + p.securityRefunded) + '</p>' +
     '<label>Session<select id="relieving-session"><option value="FN">Forenoon</option><option value="AN">Afternoon</option></select></label>' +
@@ -58,7 +58,10 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Refund Amount</th></tr></thead><tbody>' +
           overview.entitlements.map(function (e) {
             return '<tr><td>' + e.date + '</td><td>' + e.meal + '</td><td>' + e.eligiblePersons + '</td><td>' + e.servedPersons + '</td><td>' + e.remainingPersons + '</td><td>' + e.mealOrderStatus + '</td>' +
-              '<td>' + (e.alreadyRefunded ? 'Refunded' : '<input type="number" min="0" class="food-refund-input" data-entid="' + e.entitlementId + '" value="0">') + '</td></tr>';
+              '<td>' + (e.alreadyRefunded ? 'Refunded' :
+                '<input type="number" min="0" class="food-refund-input" data-entid="' + e.entitlementId + '" value="0">' +
+                (e.suggestedRefund > 0 ? '<div class="hint">Unused: ' + e.remainingPersons + ' &times; Rs ' + e.rate + ' = Rs ' + e.suggestedRefund + '</div>' : '')
+              ) + '</td></tr>';
           }).join('') +
         '</tbody></table>' +
         '<button id="submit-food-refund-btn" style="margin-top:8px">Record Food Refund</button>' +

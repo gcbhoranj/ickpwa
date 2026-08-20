@@ -229,7 +229,12 @@ async function renderTeamsList(root, user) {
 async function renderTeamDetail(root, user, teamId) {
   root.innerHTML = '<div class="wizard-card"><h1>Team Detail</h1><p>Loading…</p></div>';
   const data = await apiCall('registration.teams.detail', { teamId: teamId });
-  const receipt = data.receipts.filter(function (r) { return r.Type === 'TEMPORARY'; })[0];
+  // Prefer the FINAL settlement receipt once departure has been finalized — the TEMPORARY
+  // receipt from registration-time is only ever the fallback before that happens.
+  const finalReceipt = data.receipts.filter(function (r) { return r.Type === 'FINAL'; })[0];
+  const tempReceipt = data.receipts.filter(function (r) { return r.Type === 'TEMPORARY'; })[0];
+  const receipt = finalReceipt || tempReceipt;
+  const relievingOrder = (data.relieving || [])[0];
   root.innerHTML =
     '<div class="wizard-card">' +
       '<h1>' + data.team.CollegeName + '</h1>' +
@@ -247,8 +252,11 @@ async function renderTeamDetail(root, user, teamId) {
               ].filter(function (s) { return s; }).join(' &middot; ') + '</p>'
             : '<p>Charges not yet calculated.</p>') +
           (receipt
-            ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'
-            : '<p>No receipt generated yet.</p>')
+            ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View ' + (finalReceipt ? 'Final' : 'Temporary') + ' Receipt</button></a>'
+            : '<p>No receipt generated yet.</p>') +
+          (relievingOrder
+            ? '<a href="https://drive.google.com/file/d/' + relievingOrder.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button" style="margin-left:8px">View Relieving Order</button></a>'
+            : '')
         : '') +
       (user.role !== 'ACCOMMODATION' ? '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' : '') +
       (user.role === 'ACCOMMODATION' ? '<button id="noc-btn" style="margin-top:12px">Accommodation NOC</button>' : '') +
