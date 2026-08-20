@@ -8,15 +8,30 @@ async function renderSettingsScreen(root, user) {
   root.innerHTML = '<div class="wizard-card"><h1>Settings</h1><p>Loading…</p></div>';
   const info = await apiCall('settings.getRegistrationInfo', {});
   const timings = await apiCall('admin.settings.getMealTimings', {});
-  renderForm(info, timings);
+  const tournamentInfo = await apiCall('admin.settings.getTournamentInfo', {});
+  renderForm(info, timings, tournamentInfo);
 
-  function renderForm(info, timings) {
+  function renderForm(info, timings, tournamentInfo) {
     const locked = info.financialSettingsLocked === 'true';
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Settings</h1>' +
         '<p class="subtitle">Financial settings are currently ' + (locked ? 'LOCKED' : 'unlocked') + '</p>' +
         '<div id="settings-error" class="error" style="display:none"></div>' +
+
+        '<h2>Tournament Info</h2>' +
+        '<p>Printed on every generated document (receipts, coupons, NOC, relieving order).</p>' +
+        '<div id="tournament-error" class="error" style="display:none"></div>' +
+        '<form id="tournament-form">' +
+          '<label>Tournament Name<input type="text" id="tournament-name" value="' + tournamentInfo.tournamentName + '" required></label>' +
+          '<label>Organizer / College Name<input type="text" id="tournament-organizer" value="' + tournamentInfo.organizerName + '" required></label>' +
+          '<label>District Address<input type="text" id="tournament-address" value="' + tournamentInfo.districtAddress + '" required></label>' +
+          '<label>Start Date<input type="date" id="tournament-start" value="' + tournamentInfo.tournamentStartDate + '" required></label>' +
+          '<label>End Date<input type="date" id="tournament-end" value="' + tournamentInfo.tournamentEndDate + '" required></label>' +
+          '<button type="submit">Save Tournament Info</button>' +
+        '</form>' +
+
+        '<h2 style="margin-top:24px">Rates &amp; Security</h2>' +
         '<form id="rates-form">' +
           '<label>Breakfast Rate (Rs)<input type="number" id="rate-breakfast" min="0" step="1" value="' + info.rateBreakfast + '" ' + (locked ? 'disabled' : '') + '></label>' +
           '<label>Lunch Rate (Rs)<input type="number" id="rate-lunch" min="0" step="1" value="' + info.rateLunch + '" ' + (locked ? 'disabled' : '') + '></label>' +
@@ -44,6 +59,25 @@ async function renderSettingsScreen(root, user) {
         '<button id="back-btn" style="margin-top:16px;background:#999">Back</button>' +
       '</div>';
 
+    document.getElementById('tournament-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const errEl = document.getElementById('tournament-error');
+      errEl.style.display = 'none';
+      try {
+        const updatedTournamentInfo = await apiCall('admin.settings.updateTournamentInfo', {
+          tournamentName: document.getElementById('tournament-name').value,
+          organizerName: document.getElementById('tournament-organizer').value,
+          districtAddress: document.getElementById('tournament-address').value,
+          tournamentStartDate: document.getElementById('tournament-start').value,
+          tournamentEndDate: document.getElementById('tournament-end').value
+        });
+        renderForm(info, timings, updatedTournamentInfo);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+
     if (!locked) {
       document.getElementById('rates-form').addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -57,7 +91,7 @@ async function renderSettingsScreen(root, user) {
             dari: Number(document.getElementById('rate-dari').value),
             security: Number(document.getElementById('rate-security').value)
           });
-          renderForm(updated, timings);
+          renderForm(updated, timings, tournamentInfo);
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
@@ -71,7 +105,7 @@ async function renderSettingsScreen(root, user) {
       try {
         await apiCall('admin.settings.setFinancialLock', { locked: !locked });
         const refreshed = await apiCall('settings.getRegistrationInfo', {});
-        renderForm(refreshed, timings);
+        renderForm(refreshed, timings, tournamentInfo);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
@@ -92,7 +126,7 @@ async function renderSettingsScreen(root, user) {
           dinnerEnd: document.getElementById('timing-dinner-end').value,
           graceMinutes: Number(document.getElementById('timing-grace').value)
         });
-        renderForm(info, updatedTimings);
+        renderForm(info, updatedTimings, tournamentInfo);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
