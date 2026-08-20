@@ -889,3 +889,46 @@ an email send are exactly the kind of side effect that must never double-fire on
   extended response, so typing an Other-Adjustments value updates the shown Final Balance with
   no extra round trip), the Other Adjustments field, a Session/date picker, and one "Finalize
   & Send" button.
+
+## 24. Phase 9 amendment — Dashboard, reports, audit log (decided 2026-08-20)
+
+§17's Phase 9 cites "§75 of the original prompt" for report content — unrecoverable like every
+other original-prompt citation this project has hit. Unlike Phase 7's refund rule, reports are
+pure read-only aggregation of data that already exists (no money moves, nothing is decided),
+so concrete definitions were proposed and approved rather than left blocking. **Admin-only** —
+the spec's own screen map (§13) lists Reports/Dashboard/Audit Log only under ADMIN's nav, never
+Registration/Mess/Accommodation's.
+
+**One combined read action**, `reports.getAll` (speed — one round trip covers every report tab,
+no per-tab reload), computed live from `rowsToObjects_` reads across `TEAMS`, `CHARGES`,
+`FOOD_PACKAGES`, `MEAL_ENTITLEMENTS`, `REFUNDS`, `SECURITY_REFUNDS`, `ROOMS`, `ACCOMMODATION`,
+`ACCOMMODATION_NOC`, `SETTLEMENTS`, `RECEIPTS`, `RELIEVING` — no new sheets/columns:
+
+- `dashboard`: team counts by `Status`, total contingent persons, packages sold/revenue,
+  Dari/security collected, food/security refunds issued, room capacity/allocated per
+  `RoomType`, NOC granted vs pending counts.
+- `financial`: one row per team (charges, food revenue, refunds, `finalBalance` if settled else
+  `null`) — every team, live, regardless of departure progress.
+- `food`: one row per team, `MEAL_ENTITLEMENTS` aggregated (Eligible/Served/Remaining summed
+  across all their entitlement rows) plus package revenue and food refund total.
+- `accommodation`: the room list (capacity/allocated/remaining, mirrors `Rooms.gs`'s
+  `listRooms_`) plus one row per team (members/incharges allocated vs needed, NOC status).
+- `departure`: one row per team — current `Status` + `DepartureLockedBy` (pipeline view).
+- `collegeWiseFinalStatement`: one row **only for teams with a finalized `SETTLEMENTS` row**
+  (Phase 8's output) — the closed-out per-college statement, with Final Receipt/Relieving PDF
+  links. Teams not yet finalized simply don't appear here (distinct from `financial`, which
+  shows every team's running totals regardless of settlement status).
+
+**`reports.auditLog`** (separate action, not bundled — different data, fetched on demand):
+most recent 200 `AUDIT_LOG` rows, most-recent-first. Admin sees every row; any other role would
+see only rows where `UserId` matches their own (matches the role matrix's "own actions only"
+row) — enforced server-side even though no other role's nav currently reaches this screen,
+per this project's established "the frontend hiding a button is never the enforcement point"
+convention (spec §6).
+
+**Frontend**: replaces the Admin landing page's placeholder (`app.js`'s `renderLanding`,
+"Other screens are built in a later phase") with a real `renderAdminDashboard` in a new
+`reports.js` — fetches the bundle once, shows the dashboard summary, and passes the same
+already-fetched bundle into a new tab-switched Reports screen (financial/food/accommodation/
+departure/final-statement tabs, no additional round trip since the bundle is already in
+memory) plus a separate Audit Log screen.
