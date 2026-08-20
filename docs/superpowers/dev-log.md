@@ -681,3 +681,57 @@ were never in Registration/Mess/Accommodation's nav.
   Verified live: `fast` tier 36/36, including both new tests (non-Admin `FORBIDDEN` rejection
   plus per-team aggregation correctness for the reports bundle; Admin-vs-scoped-own-rows
   behavior for the audit log).
+
+## 2026-08-20 — Phase 10: Final QA
+
+§17's Phase 10 cites "the original prompt's §93–§104" for its checklist — unrecoverable like
+every other original-prompt citation this project has hit, so this phase's actual content was
+built from two sources instead: the full regression suite every prior phase already
+contributed to, plus a systematic audit of this log's own "explicitly not built yet"/"recorded,
+not built" notes across Phases 1–9 to confirm each was actually closed out by a later phase.
+
+- **New `test_e2e_fullTeamLifecycle`** — the one thing no single phase's own tests exercise:
+  a continuous run through the REAL handlers (not fixture shortcuts) covering registration →
+  charges → payment → temporary receipt → package purchase → three real Mess scans (Dinner/
+  Breakfast/Lunch, real 10-point-checked `recordMealUsage_`, one deliberately left un-served to
+  exercise the food-refund path) → room allocation → NOC → departure → food refund → finalize
+  → RELIEVED → confirmed correct in the Reports bundle. Six real Slides/Drive PDF generations
+  in one run; given its own `e2e` tier so it never competes with `pdf1`/`pdf2`'s budget against
+  the 6-minute ceiling. **Passed on the first live run.**
+- **Full regression, every tier, live against the deployed backend**: `fast` 36/36, `mess`
+  7/7, `pdf1` 3/3, `pdf2` 5/5, `e2e` 1/1 — **52/52 total.**
+- **Dev-log audit**: every "Explicitly NOT built yet" note from Phases 1–5 was confirmed closed
+  by its named later phase (Users UI → Phase 2, Admin Settings screen → Phase 3.5, Mess scanner
+  → Phase 5, reallocation/vacating/NOC → Phase 6 — per-team-member allocation was explicitly
+  decided *against*, not missed, per Phase 6's own design approval). Three items did NOT
+  resolve cleanly and are flagged below rather than silently left or silently patched.
+
+**Findings requiring the human partner's decision — none blocking, none touched without
+approval:**
+
+1. **The live production Sheet has accumulated ~44 teams of development/verification data**
+   (names like "Task 6 Verification College", "TEST Phase3.5 Verification College", "Live
+   Receipt Verification College" mixed with what may be genuine early real registrations like
+   "GC Sangrah"/"GC NAHAN") — 38 packages, Rs 65,200 of package revenue, none of it real
+   tournament activity. This will skew every report/dashboard number on day one if not cleared
+   before the real tournament (21–25 Sep 2026). Needs the human's judgment on what's real vs.
+   test — not something to bulk-delete unilaterally.
+2. **Any `FOOD_PACKAGES` row purchased before the QR encoder fix** (commit `2d634b6`,
+   2026-08-19 23:27 IST) **still has the old, unscannable QR baked into its already-generated
+   digital coupon PDF** — this was flagged as a residual risk when the fix shipped, deferred
+   because "no real purchases existed yet." That's no longer true (38 real-looking packages now
+   exist); some may predate the fix. `resendCoupon_` reuses the existing file rather than
+   regenerating it, so this won't self-heal. No "regenerate digital coupon" action exists yet —
+   would need one if any pre-fix package turns out to still be in play.
+3. **Possible scope gap against a requirement the human explicitly gave in Phase 7**: "the
+   final settlement receipt... must reflect only payments made for team members, not for the
+   incharge's own charges." Phase 8's Final Receipt shows `GrossMealCharges` as one blended
+   total (team members + any incharges who opted into meals) — not decomposed by
+   member-vs-incharge. Flagging rather than silently changing a financial document's formula
+   without confirmation, per this project's own established discipline (§105, "do not invent
+   rules").
+4. **"Password reset" was flagged as deferred back in Phase 2 and never revisited** — it was
+   never actually in §17's 10-phase list (every other Phase-2-deferred item maps to a named
+   later phase; this one doesn't), so no phase silently dropped it, but it's a real operational
+   gap: no self-service or Admin-driven password reset action exists anywhere in the codebase
+   today. Worth a decision on whether it's needed before the tournament.
