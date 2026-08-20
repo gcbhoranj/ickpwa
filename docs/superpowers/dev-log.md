@@ -602,3 +602,54 @@ row here, that stays Phase 8 (final receipt) since Phase 7's own listed scope ne
   new tests joined `fast` (no PDF generation involved). Verified live: `fast` tier 33/33 — the
   2 tests that had failed transiently during the Phase 6 run passed clean this time, confirming
   they were environmental as suspected, not real defects.
+
+## 2026-08-20 — Phase 8: settlement, final receipt, relieving order
+
+Closes the departure workflow Phase 7 started. Unlike Phase 7's refund amount,
+`SETTLEMENTS`' fields turned out fully derivable from data already in the sheets — a
+bookkeeping rollup, not a business-judgment call — so concrete formulas were proposed to the
+human partner and approved rather than left unrecoverable: `GrossMealCharges` = sum of the
+team's `FOOD_PACKAGES.Amount` (confirmed live that `calculateCharges_` always writes
+`CHARGES.MealCharges: 0` — food charges live entirely in packages from Phase 4 onward, not in
+registration-time `CHARGES`), `GrossDariCharges` = `CHARGES.DariCharges`, `FoodRefund`/
+`SecurityRefunded` sum the Phase 7 refund tables, `OtherAdjustments` is a manual optional entry
+(same discretion pattern as Phase 7), `FinalBalance = FoodRefund + SecurityRefunded −
+OtherAdjustments`.
+
+- **One composite action, not a multi-step wizard** — the human partner explicitly asked for
+  a speedy app flow, so `finalizeDepartureAndGenerateDocuments_` computes and persists the
+  `SETTLEMENTS` row, generates the Final Receipt PDF, generates the Relieving Order PDF,
+  emails both together, releases the departure lock, and sets `TEAMS.Status → RELIEVED` — all
+  inside one locked server call instead of five round trips. Gated on NOC granted (hard
+  precondition, matches §14's departure-workflow ordering) and the caller holding the
+  departure lock. **Idempotent**: an existing `Type: FINAL` `RECEIPTS` row for the team
+  short-circuits the whole call (checked both before and inside the lock) — returns the
+  existing receipt/relieving IDs without regenerating PDFs or re-sending email, since a
+  financial document and an email send are exactly the kind of side effect that must never
+  double-fire on a retry.
+- **Final Receipt reuses the existing "Temporary Receipt Template" file** (already
+  manually resized to A5 portrait back in Phase 3.5) rather than creating a second template —
+  `Type: FINAL` on the same `RECEIPTS` sheet. New `AmountInWords` conversion
+  (`_numberToWordsIndian_`, Indian numbering, Lakh/Crore-capable — a well-defined algorithmic
+  task, no ambiguity, unit-tested directly).
+- **Relieving Order gets its own new template**, deliberately left at Slides' default
+  landscape size — the layout is proportional (`getPageWidth()/getPageHeight()`-relative
+  throughout, same technique every prior Slides layout in this codebase uses), so it renders
+  correctly regardless of actual page size; only the printed-coupon grid ever genuinely needed
+  the one-time A4 portrait fix, since it alone targets a fixed physical size (3"×2" cells). No
+  manual resize step needed this time.
+- **Signatures/seal** (explicitly Phase 8 scope, seeded since Phase 1, never consumed by any
+  earlier phase): a shared `_drawSignatureOrLine_` helper draws the real image if
+  `PrincipalSignatureFileId`/`RegistrationInchargeSignatureFileId`/`CollegeSealFileId` holds a
+  populated Drive file ID, else falls back to the existing text-signature-line convention —
+  nothing blocks on the human uploading real signature images.
+- **Frontend**: `departure.js`'s Departure screen gains a live settlement preview once NOC is
+  granted, computed client-side from `getDepartureOverview_`'s new `settlementPreview` field
+  (shared `_computeSettlementPreview_` helper on the backend, so the preview can never drift
+  from what finalize actually persists) — typing Other Adjustments updates the shown Final
+  Balance with no extra round trip, then one "Finalize & Send" button.
+- One-time Admin setup (`admin.bootstrap.createRelievingTemplate`) run against the live
+  production Sheet. Verified live: `fast` tier 34/34, both new tests (a pure unit test plus a
+  full finalize-flow integration test — NOC gating, real PDF generation for both documents,
+  RELIEVED status, lock release, and an idempotent-repeat check that confirms a second finalize
+  call returns the same receipt rather than creating a duplicate) passed.
