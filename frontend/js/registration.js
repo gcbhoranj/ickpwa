@@ -236,10 +236,10 @@ async function renderTeamDetail(root, user, teamId) {
       '<p class="subtitle">' + data.team.RegistrationNumber + ' &middot; ' + data.team.DistrictName + ' &middot; ' + data.team.Status + '</p>' +
       '<h2>Incharges</h2>' +
       '<ul>' + data.incharges.map(function (i) { return '<li>' + i.Name + (i.IsPrimary === 'true' ? ' (Primary)' : '') + '</li>'; }).join('') + '</ul>' +
-      // MESS never sees Dari/security/total-payable or the temp receipt (backend redacts
-      // these fields to null/[] for that role — getTeamDetail_, spec §20) — the frontend
-      // simply skips rendering the sections rather than showing a misleading "not yet" state.
-      (user.role !== 'MESS'
+      // MESS/ACCOMMODATION never see Dari/security/total-payable or the temp receipt (backend
+      // redacts these fields to null/[] for those roles — getTeamDetail_, spec §20/§21) — the
+      // frontend simply skips rendering the sections rather than showing a misleading state.
+      (user.role !== 'MESS' && user.role !== 'ACCOMMODATION'
         ? (data.charges
             ? '<p>' + [
                 Number(data.charges.DariCharges) > 0 ? 'Dari: Rs ' + data.charges.DariCharges : null,
@@ -250,11 +250,19 @@ async function renderTeamDetail(root, user, teamId) {
             ? '<a href="https://drive.google.com/file/d/' + receipt.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Receipt</button></a>'
             : '<p>No receipt generated yet.</p>')
         : '') +
-      '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' +
+      (user.role !== 'ACCOMMODATION' ? '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' : '') +
+      (user.role === 'ACCOMMODATION' ? '<button id="noc-btn" style="margin-top:12px">Accommodation NOC</button>' : '') +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
-  document.getElementById('packages-btn').addEventListener('click', function () {
-    navigateTo(renderPackagesScreen, root, user, teamId, data.team.RegistrationNumber, data.incharges);
-  });
+  if (document.getElementById('packages-btn')) {
+    document.getElementById('packages-btn').addEventListener('click', function () {
+      navigateTo(renderPackagesScreen, root, user, teamId, data.team.RegistrationNumber, data.incharges);
+    });
+  }
+  if (document.getElementById('noc-btn')) {
+    document.getElementById('noc-btn').addEventListener('click', function () {
+      navigateTo(renderNocScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
+    });
+  }
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
