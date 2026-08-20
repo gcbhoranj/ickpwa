@@ -120,13 +120,13 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         const errEl = document.getElementById('departure-error');
         errEl.style.display = 'none';
         try {
-          await apiCall('departure.finalize', {
+          const finalized = await apiCall('departure.finalize', {
             teamId: teamId,
             otherAdjustments: Number(document.getElementById('other-adjustments').value) || 0,
             relievingSession: document.getElementById('relieving-session').value,
             relievingDate: document.getElementById('relieving-date').value
           });
-          goBack();
+          renderFinalizedConfirmation(finalized);
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
@@ -147,5 +147,43 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
     });
 
     document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
+  }
+
+  // Shown immediately after a successful Finalize & Send — the previous behavior navigated
+  // straight back with no confirmation, which made a genuinely successful finalize look
+  // identical to nothing having happened. Surfaces the real Drive links (view/print) and the
+  // real email outcome, with a resend path if the email failed or the incharge's address on
+  // file was wrong — Finalize & Send itself never retries the email on a repeat call.
+  function renderFinalizedConfirmation(finalized) {
+    const emailNote = finalized.emailStatus === 'SENT'
+      ? '<p style="color:#2a2">Final Receipt and Relieving Order emailed to the contingent incharge.</p>'
+      : '<p style="color:#a22">Documents generated, but the email did not go through (status: ' + finalized.emailStatus + '). ' +
+        'Use "View" to print/save them directly, or resend below.</p>';
+    root.innerHTML =
+      '<div class="wizard-card">' +
+        '<h1>Departure Finalized</h1>' +
+        '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + ' &middot; RELIEVED</p>' +
+        emailNote +
+        '<a href="https://drive.google.com/file/d/' + finalized.receiptPdfFileId + '/view" target="_blank" rel="noopener"><button type="button">View Final Receipt</button></a>' +
+        '<a href="https://drive.google.com/file/d/' + finalized.relievingPdfFileId + '/view" target="_blank" rel="noopener"><button type="button" style="margin-left:8px">View Relieving Order</button></a>' +
+        '<div id="departure-error" class="error" style="display:none;margin-top:12px"></div>' +
+        '<label style="margin-top:12px">Resend to (comma-separated emails, blank = incharges on file)<input type="text" id="resend-emails" placeholder="leave blank to use incharges on file"></label>' +
+        '<button id="resend-btn">Resend Email</button>' +
+        '<button id="done-btn" style="margin-top:16px">Done</button>' +
+      '</div>';
+    document.getElementById('resend-btn').addEventListener('click', async function () {
+      const errEl = document.getElementById('departure-error');
+      errEl.style.display = 'none';
+      const raw = document.getElementById('resend-emails').value.trim();
+      const recipientEmails = raw ? raw.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s; }) : [];
+      try {
+        const resent = await apiCall('departure.resendFinalDocuments', { teamId: teamId, recipientEmails: recipientEmails });
+        renderFinalizedConfirmation(resent);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+    document.getElementById('done-btn').addEventListener('click', function () { goBack(); });
   }
 }
