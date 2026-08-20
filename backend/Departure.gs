@@ -87,7 +87,29 @@ function getDepartureOverview_(actorSession, teamId) {
     refunds: refunds,
     securityRefunds: findRowsByField_('SECURITY_REFUNDS', 'TeamId', teamId),
     nocStatus: nocStatus.status,
-    departureLockedBy: team.values.DepartureLockedBy || null
+    departureLockedBy: team.values.DepartureLockedBy || null,
+    settlementPreview: _computeSettlementPreview_(teamId)
+  };
+}
+
+// Shared by getDepartureOverview_ (live preview, no persistence) and
+// finalizeDepartureAndGenerateDocuments_ (FinalDocuments.gs, same math, persisted) — kept in
+// one place so the preview the operator sees can never drift from what finalize actually
+// computes.
+function _computeSettlementPreview_(teamId) {
+  const charges = findRowsByField_('CHARGES', 'TeamId', teamId)[0] || null;
+  const packages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
+  const grossMealCharges = packages.reduce(function (sum, p) { return sum + Number(p.Amount); }, 0);
+  const grossDariCharges = charges ? Number(charges.DariCharges) : 0;
+  const foodRefund = findRowsByField_('REFUNDS', 'TeamId', teamId).reduce(function (sum, r) { return sum + Number(r.RefundAmount); }, 0);
+  const securityCollected = charges ? Number(charges.SecurityCharges) : 0;
+  const securityRefundRow = findRowsByField_('SECURITY_REFUNDS', 'TeamId', teamId)[0];
+  const securityRefunded = securityRefundRow ? Number(securityRefundRow.Amount) : 0;
+  const grossCharges = grossMealCharges + grossDariCharges;
+  return {
+    grossMealCharges: grossMealCharges, grossDariCharges: grossDariCharges, grossCharges: grossCharges,
+    foodRefund: foodRefund, netCharges: grossCharges - foodRefund,
+    securityCollected: securityCollected, securityRefunded: securityRefunded
   };
 }
 

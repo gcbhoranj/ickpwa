@@ -286,6 +286,14 @@ const ACTIONS = {
   'departure.recordSecurityRefund': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return recordSecurityRefund_(session, payload.teamId, payload.amount);
+  },
+  'admin.bootstrap.createRelievingTemplate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createRelievingTemplate_(session, !!(payload && payload.force));
+  },
+  'departure.finalize': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return finalizeDepartureAndGenerateDocuments_(session, payload.teamId, payload.otherAdjustments, payload.relievingSession, payload.relievingDate, payload.recipientEmails);
   }
 };
 

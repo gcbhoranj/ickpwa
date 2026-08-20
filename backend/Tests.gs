@@ -1076,6 +1076,81 @@ function test_departure_fullRefundFlow() {
   }
 }
 
+function test_finalDocuments_numberToWordsIndian() {
+  assertEqual_(_numberToWordsIndian_(0), 'Zero Rupees Only', 'zero should read as Zero Rupees Only');
+  assertEqual_(_numberToWordsIndian_(5), 'Five Rupees Only', 'single digit wrong');
+  assertEqual_(_numberToWordsIndian_(19), 'Nineteen Rupees Only', 'teen wrong');
+  assertEqual_(_numberToWordsIndian_(42), 'Forty Two Rupees Only', 'tens+ones wrong');
+  assertEqual_(_numberToWordsIndian_(100), 'One Hundred Rupees Only', 'flat hundred wrong');
+  assertEqual_(_numberToWordsIndian_(1234), 'One Thousand Two Hundred Thirty Four Rupees Only', 'thousands wrong');
+  assertEqual_(_numberToWordsIndian_(100000), 'One Lakh Rupees Only', 'flat lakh wrong');
+  assertEqual_(_numberToWordsIndian_(1234567), 'Twelve Lakh Thirty Four Thousand Five Hundred Sixty Seven Rupees Only', 'lakh+thousand+hundred combo wrong');
+  assertEqual_(_numberToWordsIndian_(10000000), 'One Crore Rupees Only', 'flat crore wrong');
+}
+
+function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const accSession = { userId: 'USR-0003', role: ROLES.ACCOMMODATION, sessionId: 'z' };
+  let fixture = null;
+  let createdTeamId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 4);
+    createdTeamId = fixture.teamId;
+
+    initiateDeparture_(regSession, createdTeamId);
+    recordFoodRefund_(regSession, createdTeamId, [{ entitlementId: fixture.entitlementIds[0], amount: 40 }]);
+
+    let threwNoNoc = false;
+    try {
+      finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    } catch (err) { threwNoNoc = true; assertEqual_(err.code, 'SECURITY_GATED_ON_NOC', 'wrong code before NOC is granted'); }
+    assertTrue_(threwNoNoc, 'finalize should require NOC before proceeding');
+
+    appendRow_('ACCOMMODATION_NOC', {
+      NocId: nextId_('NOC', 4), TeamId: createdTeamId, Status: 'NOC_GRANTED',
+      IssuedBy: accSession.userId, IssuedAt: new Date().toISOString(), Notes: '', PdfFileId: 'test-fixture-no-real-pdf'
+    });
+    // No security refund recorded on purpose — this fixture has no security charge, so
+    // finalize should proceed fine with SecurityRefunded = 0 (no SECURITY_REFUNDS row at all).
+
+    const preview = getDepartureOverview_(regSession, createdTeamId).settlementPreview;
+    assertEqual_(preview.foodRefund, 40, 'settlement preview should reflect the food refund already recorded');
+    assertEqual_(preview.securityRefunded, 0, 'settlement preview should show 0 security refunded (none recorded)');
+
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
+    assertTrue_(!!finalized.receiptPdfFileId, 'finalize should generate a real Final Receipt PDF');
+    assertTrue_(!!finalized.relievingPdfFileId, 'finalize should generate a real Relieving Order PDF');
+    assertEqual_(finalized.alreadyFinalized, false, 'first finalize call should not report alreadyFinalized');
+
+    const settlement = findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId)[0];
+    assertEqual_(Number(settlement.FoodRefund), 40, 'SETTLEMENTS.FoodRefund should match the recorded refund');
+    assertEqual_(settlement.Status, 'FINALIZED', 'SETTLEMENTS row should be FINALIZED');
+
+    const teamAfter = findRowById_('TEAMS', 'TeamId', createdTeamId);
+    assertEqual_(teamAfter.values.Status, 'RELIEVED', 'team status should flip to RELIEVED');
+    assertEqual_(teamAfter.values.DepartureLockedBy, '', 'departure lock should be released');
+
+    const repeat = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    assertEqual_(repeat.receiptId, finalized.receiptId, 'a repeat finalize call should return the SAME receipt, not generate a new one');
+    assertTrue_(repeat.alreadyFinalized, 'a repeat finalize call should report alreadyFinalized');
+    assertEqual_(findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).filter(function (r) { return r.Type === 'FINAL'; }).length, 1, 'a repeat finalize call must not create a second FINAL receipt');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdTeamId) {
+      findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SETTLEMENTS', 'SettlementId', r.SettlementId); });
+      findRowsByField_('RECEIPTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RECEIPTS', 'ReceiptId', r.ReceiptId); });
+      findRowsByField_('RELIEVING', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('RELIEVING', 'RelievingId', r.RelievingId); });
+      findRowsByField_('DOCUMENTS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('DOCUMENTS', 'DocumentId', r.DocumentId); });
+      findRowsByField_('REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('REFUNDS', 'RefundId', r.RefundId); });
+      findRowsByField_('SECURITY_REFUNDS', 'TeamId', createdTeamId).forEach(function (r) { deleteRowById_('SECURITY_REFUNDS', 'SecurityRefundId', r.SecurityRefundId); });
+      findRowsByField_('ACCOMMODATION_NOC', 'TeamId', createdTeamId).forEach(function (n) { deleteRowById_('ACCOMMODATION_NOC', 'NocId', n.NocId); });
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1752,6 +1827,7 @@ const TEST_CASES = [
   { name: 'registration_getTeamDetail_redactsFinancialsForAccommodation', fn: test_registration_getTeamDetail_redactsFinancialsForAccommodation },
   { name: 'departure_lockLifecycle', fn: test_departure_lockLifecycle },
   { name: 'departure_fullRefundFlow', fn: test_departure_fullRefundFlow },
+  { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
@@ -1773,7 +1849,8 @@ const TEST_CASES = [
   { name: 'foodPackages_perInchargeMealSelections', fn: test_foodPackages_perInchargeMealSelections, tier: 'pdf2' },
   { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf2' },
   { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' },
-  { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' }
+  { name: 'accommodation_issueNoc', fn: test_accommodation_issueNoc, tier: 'pdf2' },
+  { name: 'departure_finalizeGeneratesDocumentsAndReliefsTeam', fn: test_departure_finalizeGeneratesDocumentsAndReliefsTeam, tier: 'pdf2' }
 ];
 
 function runAllTests_() {
