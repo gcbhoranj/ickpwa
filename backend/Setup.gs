@@ -59,6 +59,47 @@ function seedSettings_() {
   });
 }
 
+// One-time (or whenever-needed) reset: clears every transactional sheet back to just its
+// header row and resets the human-facing document-numbering counters to 1. Never touches
+// USERS/SESSIONS/LOGIN_LOG or any SETTINGS value other than the Numbering_*_Next counters —
+// committee accounts and configured rates/timings/tournament-info are not "tournament data."
+// Internal record IDs (TEAM-, AUD-, etc.) are deliberately left counting from wherever they
+// were — spec §4 says these are "never shown on documents, never reused," so not resetting
+// them is correct, not an oversight. Requires the literal confirmation string "RESET" so this
+// can never fire from a stray/retried request.
+function resetTournamentData_(actorSession, confirm) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  if (confirm !== 'RESET') {
+    throw apiError_('CONFIRMATION_REQUIRED', 'Pass confirm: "RESET" to proceed — this permanently clears all tournament/team data.');
+  }
+
+  const sheetsToClear = [
+    'TEAMS', 'CONTINGENT_INCHARGES', 'PAYMENTS', 'CHARGES', 'FOOD_PACKAGES', 'FOOD_COUPONS',
+    'PACKAGE_INCHARGE_MEALS', 'PRINTED_COUPONS', 'MEAL_ENTITLEMENTS', 'MEAL_USAGE',
+    'MEAL_ORDER_STATUS', 'ROOMS', 'ACCOMMODATION', 'ACCOMMODATION_NOC', 'REFUNDS',
+    'SECURITY_REFUNDS', 'SETTLEMENTS', 'RECEIPTS', 'RELIEVING', 'DOCUMENTS', 'EMAIL_LOG', 'AUDIT_LOG'
+  ];
+  sheetsToClear.forEach(function (name) {
+    const sheet = getSheet_(name);
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, SHEET_SCHEMAS[name].length).clearContent();
+  });
+
+  ['Registration', 'Receipt', 'Coupon', 'Refund', 'Relieving', 'Accommodation'].forEach(function (type) {
+    setSetting_('Numbering_' + type + '_Next', '1', actorSession.userId);
+  });
+
+  // AUDIT_LOG was just cleared above — this is deliberately the first fresh row in it,
+  // recording the reset itself rather than leaving no trace that it happened.
+  const now = new Date().toISOString();
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'RESET_TOURNAMENT_DATA', Entity: 'SYSTEM', EntityId: '', PreviousState: '', NewState: sheetsToClear.join(',')
+  });
+
+  return { sheetsCleared: sheetsToClear, numberingReset: true, resetAt: now };
+}
+
 function _ensureSubfolder_(parent, name) {
   const existing = parent.getFoldersByName(name);
   return existing.hasNext() ? existing.next() : parent.createFolder(name);

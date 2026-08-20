@@ -310,6 +310,10 @@ const ACTIONS = {
   'admin.settings.updateTournamentInfo': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return updateTournamentInfo_(session, payload);
+  },
+  'admin.bootstrap.resetTournamentData': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resetTournamentData_(session, payload && payload.confirm);
   }
 };
 
