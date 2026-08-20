@@ -562,3 +562,43 @@ certificate), then a lean implementation plan
   `pdf2` tier 4/4 including the new `accommodation_issueNoc` test. One-time Admin setup
   (`admin.bootstrap.setupSchema`/`setupDriveFolders`/`createNocTemplate`) run against the live
   production Sheet with real Admin credentials supplied by the human partner.
+
+## 2026-08-20 — Phase 7: departure lock, food refund, security refund
+
+§17's Phase 7 cited "the dinner-ordered logic" from an original-prompt section number that was
+never saved into this repo — the exact refund formula was genuinely unrecoverable. Rather than
+invent a financial rule (the spec's own §105 binding constraint), this was raised with the
+human partner directly, who clarified the real answer: **refund amounts are the Mess Committee
+Convener's discretion, not a fixed formula.** A short follow-up question settled how the
+software should support that discretion (manual per-meal entry, no calculated suggestion).
+Recorded as spec §22, scoped narrower than a literal reading of §17 item 7 — no `SETTLEMENTS`
+row here, that stays Phase 8 (final receipt) since Phase 7's own listed scope never mentions it.
+
+- **New `Departure.gs`**: `initiateDeparture_`/`cancelDeparture_` implement the departure-lock
+  check-and-set spec §6 point 4a already specified (`TEAMS.DepartureLockedBy/At`) — rejects a
+  different user with the holder's name, idempotent-resume for the same caller, cancel by the
+  holder or Admin only and never touches refunds already recorded (append-only, same
+  philosophy as every other transactional tab). `recordFoodRefund_` takes
+  `[{entitlementId, amount}]` — the Departure screen shows Eligible/Served/Remaining/
+  MealOrderStatus per entitlement purely as reference data, the operator enters the actual
+  amount per row after consulting the Convener off-system; each entitlement refundable once
+  (`ALREADY_REFUNDED` on a repeat — the same double-write-on-retry guard class Phase 6 applied
+  to `reallocateRoom_`, since `REFUNDS` is append-only). `recordSecurityRefund_` is gated on
+  `ACCOMMODATION_NOC.Status === 'NOC_GRANTED'` (reuses Phase 6's `getNocStatus_`), amount also
+  manual (charged amount shown as reference only, not prefilled — damage deductions are a real
+  possibility the spec never enumerates), one per team.
+- **No schema changes needed at all** — `TEAMS.DepartureLockedBy/At`, `REFUNDS`, and
+  `SECURITY_REFUNDS` were already fully specified and created by earlier phases' `setupSchema`
+  runs, just never populated until now.
+- **Role gating narrower than Phase 6**: all `departure.*` actions are
+  `[ROLES.ADMIN, ROLES.REGISTRATION]` only, per the spec's own role matrix — MESS and
+  ACCOMMODATION get no access here at all, unlike the Teams-list widening Phase 6 gave them.
+- **Frontend**: new `departure.js`, reached from Team Detail's new "Process Departure" button
+  (REGISTRATION role only). Service worker bumped to v22.
+- **Testing**: reused Phase 5's `_makeMessTestFixture_`/`_cleanupMessTestFixture_` helpers for
+  a team+entitlements fixture, and wrote directly into `ACCOMMODATION_NOC` for the NOC-gating
+  test rather than calling the real `issueNoc_` — that function's PDF generation is already
+  covered by Phase 6's own test, so this avoided a second real Slides/Drive round trip. Both
+  new tests joined `fast` (no PDF generation involved). Verified live: `fast` tier 33/33 — the
+  2 tests that had failed transiently during the Phase 6 run passed clean this time, confirming
+  they were environmental as suspected, not real defects.
