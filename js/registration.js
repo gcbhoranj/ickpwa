@@ -279,6 +279,9 @@ async function renderTeamDetail(root, user, teamId) {
       (user.role !== 'ACCOMMODATION' ? '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' : '') +
       (user.role === 'ACCOMMODATION' ? '<button id="noc-btn" style="margin-top:12px">Accommodation NOC</button>' : '') +
       (user.role === 'REGISTRATION' ? '<button id="departure-btn" style="margin-top:12px">Process Departure</button>' : '') +
+      // Correction 2026-08-20: refund authority for unused meal coupons belongs to Mess, not
+      // Registration — Mess reaches its own food-refund screen from here.
+      (user.role === 'MESS' ? '<button id="food-refund-btn" style="margin-top:12px">Food Refund</button>' : '') +
       '<button id="back-btn" style="margin-top:12px">Back to Teams</button>' +
     '</div>';
   if (document.getElementById('packages-btn')) {
@@ -294,6 +297,11 @@ async function renderTeamDetail(root, user, teamId) {
   if (document.getElementById('departure-btn')) {
     document.getElementById('departure-btn').addEventListener('click', function () {
       navigateTo(renderDepartureScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
+    });
+  }
+  if (document.getElementById('food-refund-btn')) {
+    document.getElementById('food-refund-btn').addEventListener('click', function () {
+      navigateTo(renderFoodRefundScreen, root, user, teamId, data.team.RegistrationNumber, data.team.CollegeName);
     });
   }
   if (document.getElementById('resend-final-btn')) {

@@ -1,7 +1,10 @@
 // departure.js — Phase 7: Departure screen (Registration role only). Shows the departure-lock
 // state, meal-entitlement reference data (Eligible/Served/Remaining/MealOrderStatus — no
-// formula applied, refund amounts are the Mess Convener's discretion per spec §22), a manual
-// per-entitlement food-refund entry form, and the NOC-gated security-refund action.
+// formula applied, refund amounts are the Mess Committee's discretion per spec §22) as
+// READ-ONLY reference, and the NOC-gated security-refund action. Food refund entry itself
+// moved to Mess's own screen (mess.js's renderFoodRefundScreen) — correction 2026-08-20:
+// refund authority belongs to Mess, not Registration; the backend now rejects Registration's
+// attempts to record one even while it holds this team's departure lock.
 
 function _renderFinalizeSection(overview) {
   const p = overview.settlementPreview;
@@ -54,17 +57,14 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         '<h1>Process Departure</h1>' +
         '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + ' &middot; ' + overview.team.Status + '</p>' +
         '<div id="departure-error" class="error" style="display:none"></div>' +
-        '<h2>Meal Entitlements (reference only — refund amount is your judgment call)</h2>' +
-        '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Refund Amount</th></tr></thead><tbody>' +
+        '<h2>Meal Entitlements (reference only — refund amount is the Mess Committee\'s call, recorded on their own screen)</h2>' +
+        '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Food Refund</th></tr></thead><tbody>' +
           overview.entitlements.map(function (e) {
+            const refundRow = overview.refunds.filter(function (r) { return r.EntitlementId === e.entitlementId; })[0];
             return '<tr><td>' + e.date + '</td><td>' + e.meal + '</td><td>' + e.eligiblePersons + '</td><td>' + e.servedPersons + '</td><td>' + e.remainingPersons + '</td><td>' + e.mealOrderStatus + '</td>' +
-              '<td>' + (e.alreadyRefunded ? 'Refunded' :
-                '<input type="number" min="0" class="food-refund-input" data-entid="' + e.entitlementId + '" value="0">' +
-                (e.suggestedRefund > 0 ? '<div class="hint">Unused: ' + e.remainingPersons + ' &times; Rs ' + e.rate + ' = Rs ' + e.suggestedRefund + '</div>' : '')
-              ) + '</td></tr>';
+              '<td>' + (refundRow ? 'Refunded: Rs ' + refundRow.RefundAmount : 'Awaiting Mess Committee') + '</td></tr>';
           }).join('') +
         '</tbody></table>' +
-        '<button id="submit-food-refund-btn" style="margin-top:8px">Record Food Refund</button>' +
         '<h2 style="margin-top:16px">Security Refund</h2>' +
         '<p>Charged: Rs ' + overview.securityCharged + ' &middot; NOC: ' + overview.nocStatus + '</p>' +
         (overview.securityRefunds.length > 0
@@ -76,23 +76,6 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         '<button id="cancel-departure-btn" style="margin-top:16px;background:#999">Cancel Departure</button>' +
         '<button id="back-btn" style="margin-top:12px">Back</button>' +
       '</div>';
-
-    document.getElementById('submit-food-refund-btn').addEventListener('click', async function () {
-      const errEl = document.getElementById('departure-error');
-      errEl.style.display = 'none';
-      const entries = Array.prototype.map.call(document.querySelectorAll('.food-refund-input'), function (input) {
-        return { entitlementId: input.getAttribute('data-entid'), amount: Number(input.value) };
-      }).filter(function (e) { return e.amount > 0; });
-      if (entries.length === 0) return;
-      try {
-        await apiCall('departure.recordFoodRefund', { teamId: teamId, entries: entries });
-        overview = await apiCall('departure.overview', { teamId: teamId });
-        renderInProgress();
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.style.display = 'block';
-      }
-    });
 
     if (document.getElementById('submit-security-refund-btn')) {
       document.getElementById('submit-security-refund-btn').addEventListener('click', async function () {
