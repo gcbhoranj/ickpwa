@@ -735,3 +735,28 @@ approval:**
    later phase; this one doesn't), so no phase silently dropped it, but it's a real operational
    gap: no self-service or Admin-driven password reset action exists anywhere in the codebase
    today. Worth a decision on whether it's needed before the tournament.
+
+## 2026-08-20 — Tournament Info settings, and clearing dev/test data for go-live
+
+Two follow-ups from the Phase 10 findings, done with the human partner's explicit direction on
+each rather than assumed.
+
+- **Tournament Info now editable**: `TournamentName`/`OrganizerName`/`DistrictAddress`/
+  tournament dates were seeded once in Phase 1 and printed on every generated document since,
+  but had no update action — Admin's Settings screen now has a Tournament Info form
+  (`admin.settings.getTournamentInfo`/`updateTournamentInfo`, ADMIN only, date-range validated).
+- **All accumulated dev/verification data cleared from the live production Sheet.** Listed the
+  full 45-team roster for the human partner first (finding #1 from Phase 10): a mix of obvious
+  test names and realistic HP-college names that turned out to all be `Status: REGISTERED`
+  only, months before the tournament opens — consistent with manual dev testing, not real
+  advance registrations. Confirmed explicitly: none of it was real, safe to wipe entirely
+  (Room Master included). New `resetTournamentData_` (ADMIN only, requires the literal
+  `confirm:"RESET"` string) clears all 22 transactional sheets back to header-only and resets
+  the six document-numbering counters to 1 — never touches `USERS`/`SESSIONS`/`LOGIN_LOG` or
+  any non-numbering `SETTINGS` value, so committee logins and configured rates/timings survive
+  untouched. Executed live; verified after: `reports.getAll` shows zero everywhere, all user
+  accounts intact, a spot-check test still passes clean. The production Sheet is now a genuine
+  blank slate, ready for real registrations.
+- **Not yet addressed** (still open from Phase 10, unchanged): pre-fix-QR coupon risk (moot
+  now — the packages that risk applied to no longer exist after the reset above), the
+  Final-Receipt team-vs-incharge charge decomposition question, and password reset.
