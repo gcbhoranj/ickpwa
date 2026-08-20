@@ -154,7 +154,7 @@ function _buildDigitalCouponLayout_(pres, data) {
   const footerTextLeft = margin + footerBadgeW + pageWidth * 0.03;
   _couponText_(slide, 'SCAN QR AT MEAL COUNTER', footerTextLeft, footerTop + footerHeight * 0.18, pageWidth - footerTextLeft - margin, footerHeight * 0.3, 10, '#FFFFFF', { bold: true });
   _couponText_(
-    slide, 'VALID FOR MEAL SERVICE — Dinner ' + data.startDate + ' · Breakfast & Lunch ' + data.endDate,
+    slide, 'VALID FOR MEAL SERVICE — ' + data.mealWindowLabel,
     footerTextLeft, footerTop + footerHeight * 0.5, pageWidth - footerTextLeft - margin, footerHeight * 0.4, 8.5, '#FFFFFF', {}
   );
 

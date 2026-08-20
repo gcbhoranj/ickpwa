@@ -642,7 +642,7 @@ function test_foodPackages_messRoleParity() {
     const team = registerTeam_(regSession, 'Mess Sale Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
 
-    const pkg = purchasePackage_(messSession, createdTeamId, [], null, 'Cash', null);
+    const pkg = purchasePackage_(messSession, createdTeamId, [], null, null, 'Cash', null);
     createdPackageIds.push(pkg.packageId);
     trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
     assertTrue_(pkg.amount > 0, 'MESS-purchased package should report a real amount, not hidden/zeroed');
@@ -911,7 +911,7 @@ function test_foodPackages_purchaseCreatesEverythingCorrectly() {
     const rateLunch = Number(getSetting_('RateLunch', '0'));
     const rateDinner = Number(getSetting_('RateDinner', '0'));
 
-    const pkg1 = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null);
+    const pkg1 = purchasePackage_(regSession, createdTeamId, [], null, null, 'Cash', null);
     createdPackageIds.push(pkg1.packageId);
     trashFileIds.push(pkg1.digitalCouponFileId, pkg1.printedCouponFileId);
 
@@ -947,7 +947,7 @@ function test_foodPackages_purchaseCreatesEverythingCorrectly() {
     const teamIncharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId);
     const pkg2 = purchasePackage_(regSession, createdTeamId, teamIncharges.map(function (i) {
       return { inchargeId: i.InchargeId, breakfast: true, lunch: true, dinner: true };
-    }), null, 'Cash', null);
+    }), null, null, 'Cash', null);
     createdPackageIds.push(pkg2.packageId);
     trashFileIds.push(pkg2.digitalCouponFileId, pkg2.printedCouponFileId);
     assertEqual_(pkg2.packageNumber, 2, 'second package should be PackageNumber 2');
@@ -978,7 +978,7 @@ function test_foodPackages_resendAndReprint() {
   try {
     const team = registerTeam_(regSession, 'Resend Reprint Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
-    const pkg = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null);
+    const pkg = purchasePackage_(regSession, createdTeamId, [], null, null, 'Cash', null);
     createdPackageId = pkg.packageId;
     trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
 
@@ -1301,7 +1301,7 @@ function test_foodPackages_perInchargeMealSelections() {
     const pkg = purchasePackage_(regSession, createdTeamId, [
       { inchargeId: lunchOnly.InchargeId, breakfast: false, lunch: true, dinner: false },
       { inchargeId: hotelOnly.InchargeId, breakfast: false, lunch: false, dinner: false }
-    ], null, 'Cash', null);
+    ], null, null, 'Cash', null);
     createdPackageId = pkg.packageId;
     trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
 
@@ -1344,6 +1344,72 @@ function test_foodPackages_perInchargeMealSelections() {
   }
 }
 
+// Feature (2026-08-20): a package can exclude individual meals — the late-arrival scenario a
+// human partner described: a team registering the morning after arriving late at night never
+// had the previous night's Dinner, so their Package 1 should cover only Breakfast+Lunch, not
+// a Dinner they were never present for.
+function test_foodPackages_mealExclusion_lateArrivalScenario() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let createdTeamId = null;
+  let createdPackageId = null;
+  const trashFileIds = [];
+  try {
+    const team = registerTeam_(regSession, 'Late Arrival Test College', 'District', 3, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
+    const rateLunch = Number(getSetting_('RateLunch', '0'));
+
+    // Registering on day 2 for a team that arrived too late for day 1's Dinner — the operator
+    // explicitly back-dates Dinner to day 1 (the tournament's real Day 1) so the package's
+    // window is still correct, but excludes it from what's actually purchased.
+    const dinnerDate = '2026-09-21';
+    const pkg = purchasePackage_(regSession, createdTeamId, [], { dinner: false, breakfast: true, lunch: true }, dinnerDate, 'Cash', null);
+    createdPackageId = pkg.packageId;
+    trashFileIds.push(pkg.digitalCouponFileId, pkg.printedCouponFileId);
+
+    assertEqual_(pkg.amount, rateBreakfast * 3 + rateLunch * 3, 'excluded Dinner must not be charged for');
+    assertTrue_(!pkg.mealsIncluded.dinner, 'response should reflect Dinner as excluded');
+    assertTrue_(pkg.mealsIncluded.breakfast && pkg.mealsIncluded.lunch, 'response should reflect Breakfast and Lunch as included');
+    assertTrue_(pkg.mealWindowLabel.indexOf('Dinner') === -1, 'the coupon\'s meal-window label must not claim Dinner when it was excluded');
+
+    const entitlements = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', pkg.packageId);
+    assertEqual_(entitlements.length, 2, 'an excluded meal should get no MEAL_ENTITLEMENTS row at all, not a zeroed one');
+    const meals = entitlements.map(function (e) { return e.Meal; }).sort();
+    assertEqual_(meals.join(','), 'BREAKFAST,LUNCH', 'only Breakfast and Lunch entitlements should exist');
+    assertTrue_(entitlements.every(function (e) { return Number(e.EligiblePersons) === 3; }), 'included meals should carry the full team-member count');
+
+    // A late team's coupon scanned at the excluded Dinner slot must find nothing to resolve —
+    // proven directly against the same lookup Mess.gs's _resolveCoupon_ performs.
+    const dinnerEntitlement = findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', pkg.packageId)
+      .filter(function (e) { return e.Meal === 'DINNER' && e.Date === dinnerDate; })[0];
+    assertTrue_(!dinnerEntitlement, 'no entitlement should exist for the excluded Dinner date+meal — a scan there must find nothing');
+
+    // Rejects a package with every meal excluded — there would be nothing to sell.
+    let threwNoMeals = false;
+    try {
+      purchasePackage_(regSession, createdTeamId, [], { dinner: false, breakfast: false, lunch: false }, null, 'Cash', null);
+    } catch (err) {
+      threwNoMeals = true;
+      assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong error code for an all-excluded package');
+    }
+    assertTrue_(threwNoMeals, 'a package excluding every meal must be rejected');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (createdPackageId) {
+      findRowsByField_('PACKAGE_INCHARGE_MEALS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PACKAGE_INCHARGE_MEALS', 'PackageInchargeMealId', r.PackageInchargeMealId); });
+      findRowsByField_('PRINTED_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('PRINTED_COUPONS', 'PrintedCouponId', r.PrintedCouponId); });
+      findRowsByField_('MEAL_ENTITLEMENTS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('MEAL_ENTITLEMENTS', 'EntitlementId', r.EntitlementId); });
+      findRowsByField_('FOOD_COUPONS', 'PackageId', createdPackageId).forEach(function (r) { deleteRowById_('FOOD_COUPONS', 'CouponId', r.CouponId); });
+      deleteRowById_('FOOD_PACKAGES', 'PackageId', createdPackageId);
+    }
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Bug report (2026-08-20): the portal was allowing the same package to be sold to a team
 // more than once. Root cause: purchasePackage_ had no idempotency guard at all (unlike every
 // other write handler's ALREADY_CALCULATED/ALREADY_PAID-style pattern) and no lock, despite
@@ -1363,14 +1429,14 @@ function test_foodPackages_duplicatePurchaseIsRejected() {
     const team = registerTeam_(regSession, 'Duplicate Purchase Test College', 'District', 2, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
 
-    const first = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null, 'req-dup-1');
+    const first = purchasePackage_(regSession, createdTeamId, [], null, null, 'Cash', null, 'req-dup-1');
     createdPackageIds.push(first.packageId);
     trashFileIds.push(first.digitalCouponFileId, first.printedCouponFileId);
 
     // Same clientRequestId (simulating the documented retry-on-transient-glitch behavior,
     // which re-sends the exact same request body) must return the ORIGINAL package, not
     // create a second one.
-    const replay = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null, 'req-dup-1');
+    const replay = purchasePackage_(regSession, createdTeamId, [], null, null, 'Cash', null, 'req-dup-1');
     assertEqual_(replay.packageId, first.packageId, 'a replayed requestId must return the original package, not create a new one');
     assertTrue_(!!replay.replay, 'replay result should be flagged as a replay');
     assertEqual_(findRowsByField_('FOOD_PACKAGES', 'TeamId', createdTeamId).length, 1, 'a replayed requestId must not create a second FOOD_PACKAGES row');
@@ -1380,7 +1446,7 @@ function test_foodPackages_duplicatePurchaseIsRejected() {
     // with a clear message, not silently create an overlapping second package.
     let threwDuplicate = false;
     try {
-      purchasePackage_(regSession, createdTeamId, [], first.startMeal, 'Cash', null, 'req-dup-2');
+      purchasePackage_(regSession, createdTeamId, [], null, first.startMeal, 'Cash', null, 'req-dup-2');
     } catch (err) {
       threwDuplicate = true;
       assertEqual_(err.code, 'DUPLICATE_PACKAGE', 'wrong error code for an overlapping-date duplicate purchase');
@@ -1394,7 +1460,7 @@ function test_foodPackages_duplicatePurchaseIsRejected() {
     // fell on (different meals, same date) — "rolling coverage continuous with no gaps" is
     // the whole point, and a naive date-range overlap check would wrongly reject this exact
     // scenario (caught live before shipping, see dev-log).
-    const second = purchasePackage_(regSession, createdTeamId, [], null, 'Cash', null, 'req-dup-3');
+    const second = purchasePackage_(regSession, createdTeamId, [], null, null, 'Cash', null, 'req-dup-3');
     createdPackageIds.push(second.packageId);
     trashFileIds.push(second.digitalCouponFileId, second.printedCouponFileId);
     assertEqual_(second.packageNumber, 2, 'a legitimate rolling second package must succeed, not be rejected as a duplicate');
@@ -1446,10 +1512,10 @@ const TEST_CASES = [
   { name: 'qrEncoder_structuralValidity', fn: test_qrEncoder_structuralValidity },
   // 'pdf' tier: real Slides/Drive document generation (~30-40s each) — the original reason
   // for a slow bucket at all (Phase 4).
-  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, tier: 'pdf' },
-  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, tier: 'pdf' },
+  { name: 'foodPackages_purchaseCreatesEverythingCorrectly', fn: test_foodPackages_purchaseCreatesEverythingCorrectly, tier: 'pdf1' },
+  { name: 'foodPackages_resendAndReprint', fn: test_foodPackages_resendAndReprint, tier: 'pdf1' },
   { name: 'registration_getTeamDetail_redactsFinancialsForMess', fn: test_registration_getTeamDetail_redactsFinancialsForMess },
-  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf' },
+  { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },
   // 'mess' tier: _makeMessTestFixture_ (registerTeam_ + FOOD_PACKAGES + FOOD_COUPONS +
@@ -1467,8 +1533,9 @@ const TEST_CASES = [
   { name: 'mess_recordUsage_rejectsOutsideWindowAndInactiveTeam', fn: test_mess_recordUsage_rejectsOutsideWindowAndInactiveTeam, tier: 'mess' },
   { name: 'mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements', fn: test_mess_setMealOrderStatus_upsertsAndMirrorsToEntitlements, tier: 'mess' },
   { name: 'mess_todaysSummary_aggregatesByTeam', fn: test_mess_todaysSummary_aggregatesByTeam, tier: 'mess' },
-  { name: 'foodPackages_perInchargeMealSelections', fn: test_foodPackages_perInchargeMealSelections, tier: 'pdf' },
-  { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf' }
+  { name: 'foodPackages_perInchargeMealSelections', fn: test_foodPackages_perInchargeMealSelections, tier: 'pdf2' },
+  { name: 'foodPackages_duplicatePurchaseIsRejected', fn: test_foodPackages_duplicatePurchaseIsRejected, tier: 'pdf2' },
+  { name: 'foodPackages_mealExclusion_lateArrivalScenario', fn: test_foodPackages_mealExclusion_lateArrivalScenario, tier: 'pdf2' }
 ];
 
 function runAllTests_() {

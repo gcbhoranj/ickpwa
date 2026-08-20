@@ -18,7 +18,12 @@
 // reference design: team name, the PRIMARY contingent incharge's name/designation/contact
 // (not a list of every incharge — the card has room for one), team roster size, package
 // number, meal window, and the QR token itself.
-function _buildCouponDisplayData_(team, packageNumber, eligiblePersons, startDate, endDate, couponId, qrToken) {
+// mealWindowLabel (optional, only meaningful for the digital coupon's footer text — the
+// printed sheet doesn't use it): describes exactly which meals this package covers, since a
+// meal-excluded package (spec §20-late-arrival amendment) must never claim a meal it doesn't
+// actually entitle. Reprint reconstructs coupon data for an existing package and doesn't pass
+// one — falls back to the always-correct-in-that-context original full-window phrasing.
+function _buildCouponDisplayData_(team, packageNumber, eligiblePersons, startDate, endDate, couponId, qrToken, mealWindowLabel) {
   const incharges = findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', team.TeamId);
   const primary = incharges.filter(function (i) { return i.IsPrimary === 'true'; })[0] || incharges[0] || {};
   return {
@@ -26,6 +31,7 @@ function _buildCouponDisplayData_(team, packageNumber, eligiblePersons, startDat
     registrationNumber: team.RegistrationNumber, packageNumber: packageNumber,
     eligiblePersons: eligiblePersons, teamMembers: Number(team.NumberOfTeamMembers),
     startDate: startDate, endDate: endDate, couponId: couponId, qrToken: qrToken,
+    mealWindowLabel: mealWindowLabel || ('Dinner ' + startDate + ' · Breakfast & Lunch ' + endDate),
     inchargeName: primary.Name || '', inchargeDesignation: primary.Designation || '',
     inchargeWhatsapp: primary.WhatsAppNumber || '', inchargeEmail: primary.EmailAddress || ''
   };
@@ -91,6 +97,32 @@ function _packageResponseFromExistingRow_(pkgRow, isReplay) {
   };
 }
 
+// mealInclusion (optional): {dinner, breakfast, lunch} booleans, each defaulting to true when
+// omitted or when mealInclusion itself is omitted — the normal case where a package covers
+// all three meals. Lets a package deliberately exclude a meal a team was never present for —
+// e.g. a team registering the morning after arriving late at night never had that first
+// Dinner, so their Package 1 should cover only Breakfast+Lunch (decided with the human
+// 2026-08-20). An excluded meal gets no MEAL_ENTITLEMENTS row at all (not a zeroed one) —
+// a scan attempt against it is simply "not valid for this coupon," and it contributes
+// nothing to Amount.
+function _resolveMealInclusion_(mealInclusion) {
+  function included(key) { return !mealInclusion || mealInclusion[key] !== false; }
+  return { dinner: included('dinner'), breakfast: included('breakfast'), lunch: included('lunch') };
+}
+
+// Coupon footer text describing which meals this specific package actually covers — must
+// reflect real inclusions/exclusions, not always assume all three (a printed/digital coupon
+// claiming "Dinner" for a package that excludes it would be actively misleading to both the
+// team and Mess).
+function _mealWindowLabel_(mealInclusion, startDate, endDate) {
+  const parts = [];
+  if (mealInclusion.dinner) parts.push('Dinner ' + startDate);
+  if (mealInclusion.breakfast && mealInclusion.lunch) parts.push('Breakfast & Lunch ' + endDate);
+  else if (mealInclusion.breakfast) parts.push('Breakfast ' + endDate);
+  else if (mealInclusion.lunch) parts.push('Lunch ' + endDate);
+  return parts.join(' · ');
+}
+
 // clientRequestId (optional): closes a real, live-confirmed bug (2026-08-20) — the frontend's
 // documented retry-on-transient-glitch behavior (api-client.js) re-sends the exact same
 // request body, including the same requestId, if Apps Script's response redirect isn't ready
@@ -100,7 +132,7 @@ function _packageResponseFromExistingRow_(pkgRow, isReplay) {
 // rolling default-date computation sees the just-created package and picks the NEXT
 // (non-overlapping) date, not the same one. The separate overlap check below catches the
 // different case of a genuinely duplicate sale attempt (different requestId).
-function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDate, mode, recipientEmails, clientRequestId) {
+function purchasePackage_(actorSession, teamId, inchargeMealSelections, mealInclusion, dinnerDate, mode, recipientEmails, clientRequestId) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION, ROLES.MESS]);
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   if (!team) throw apiError_('NOT_FOUND', 'No such team: ' + teamId);
@@ -109,6 +141,11 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
   if (clientRequestId) {
     const existingByRequestId = findRowsByField_('FOOD_PACKAGES', 'ClientRequestId', clientRequestId)[0];
     if (existingByRequestId) return _packageResponseFromExistingRow_(existingByRequestId, true);
+  }
+
+  const included = _resolveMealInclusion_(mealInclusion);
+  if (!included.dinner && !included.breakfast && !included.lunch) {
+    throw apiError_('VALIDATION_ERROR', 'At least one meal must be included in the package.');
   }
 
   const teamMembers = Number(team.values.NumberOfTeamMembers);
@@ -131,7 +168,6 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
   const rateBreakfast = Number(getSetting_('RateBreakfast', '0'));
   const rateLunch = Number(getSetting_('RateLunch', '0'));
   const rateDinner = Number(getSetting_('RateDinner', '0'));
-  const amount = rateDinner * dinnerEligible + rateBreakfast * breakfastEligible + rateLunch * lunchEligible;
 
   // The lock covers only the decide-and-write critical section (packageNumber assignment,
   // the overlap check, and every row write below) — NOT the PDF generation/email that
@@ -139,7 +175,7 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
   // script-wide lock across it would needlessly stall every other concurrent purchase.
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  let packageId, couponId, qrToken, now, packageNumber, startDate, endDate;
+  let packageId, couponId, qrToken, now, packageNumber, startDate, endDate, meals, amount;
   try {
     if (clientRequestId) {
       const existingByRequestId2 = findRowsByField_('FOOD_PACKAGES', 'ClientRequestId', clientRequestId)[0];
@@ -151,24 +187,31 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
     startDate = _defaultPackageDinnerDate_(teamId, dinnerDate);
     endDate = _addDays_(startDate, 1);
 
-    // Reject a genuine duplicate sale: any ACTIVE package for this team whose actual meal
-    // slots collide with the one being purchased now. NOT a plain date-range overlap — every
-    // legitimate rolling package deliberately SHARES a boundary calendar date with the next
-    // one (Package 2's Dinner lands the same day as Package 1's Breakfast/Lunch — different
-    // meals, same date; "rolling coverage continuous with no gaps" is the whole point). A
-    // naive [StartMeal,EndMeal] range-overlap check flags that legitimate continuation as a
-    // false positive (caught live by this file's own regression test before shipping — see
-    // dev-log). The real collision condition, given every package is always exactly Dinner
-    // on its StartMeal + Breakfast/Lunch on its EndMeal: this package's Dinner falls on an
-    // existing package's Dinner date, or this package's Breakfast/Lunch falls on an existing
-    // package's Breakfast/Lunch date.
-    const overlapping = existingPackages.filter(function (p) {
-      return p.Status === 'ACTIVE' && (startDate === p.StartMeal || endDate === p.EndMeal);
-    })[0];
-    if (overlapping) {
+    meals = [];
+    if (included.dinner) meals.push({ meal: 'DINNER', date: startDate, rate: rateDinner, eligiblePersons: dinnerEligible });
+    if (included.breakfast) meals.push({ meal: 'BREAKFAST', date: endDate, rate: rateBreakfast, eligiblePersons: breakfastEligible });
+    if (included.lunch) meals.push({ meal: 'LUNCH', date: endDate, rate: rateLunch, eligiblePersons: lunchEligible });
+    amount = meals.reduce(function (sum, m) { return sum + m.rate * m.eligiblePersons; }, 0);
+
+    // Reject a genuine duplicate sale: does this team already have an ACTIVE entitlement for
+    // any of the exact (date, meal) slots this purchase would create? Checked directly
+    // against MEAL_ENTITLEMENTS (the source of truth for what's actually covered) rather than
+    // FOOD_PACKAGES' StartMeal/EndMeal window — a plain date-range check would wrongly flag
+    // the legitimate rolling case (Package 2's Dinner lands the same calendar day as Package
+    // 1's Breakfast/Lunch — different meals, same date; "rolling coverage continuous with no
+    // gaps" is the whole point) as a false positive, caught live by this file's own
+    // regression test before shipping (see dev-log). Comparing actual (date, meal) slots
+    // handles that correctly AND correctly handles meal-excluded packages, where a package's
+    // StartMeal/EndMeal window no longer corresponds 1:1 with what it actually entitles.
+    const teamEntitlements = findRowsByField_('MEAL_ENTITLEMENTS', 'TeamId', teamId).filter(function (e) { return e.Status === 'ACTIVE'; });
+    const collision = meals.map(function (m) {
+      return teamEntitlements.filter(function (e) { return e.Date === m.date && e.Meal === m.meal; })[0];
+    }).filter(function (e) { return !!e; })[0];
+    if (collision) {
+      const collisionPkg = findRowById_('FOOD_PACKAGES', 'PackageId', collision.PackageId);
       throw apiError_('DUPLICATE_PACKAGE',
-        'This package has already been sold to ' + team.values.CollegeName + ' (Package ' +
-        overlapping.PackageNumber + ', ' + overlapping.StartMeal + ' to ' + overlapping.EndMeal + ').');
+        'This package has already been sold to ' + team.values.CollegeName + ' — ' + collision.Meal + ' ' + collision.Date +
+        ' is already covered by Package ' + (collisionPkg ? collisionPkg.values.PackageNumber : collision.PackageId) + '.');
     }
 
     packageId = nextId_('PKG', 4);
@@ -208,11 +251,6 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
       }));
     }
 
-    const meals = [
-      { meal: 'DINNER', date: startDate, rate: rateDinner, eligiblePersons: dinnerEligible },
-      { meal: 'BREAKFAST', date: endDate, rate: rateBreakfast, eligiblePersons: breakfastEligible },
-      { meal: 'LUNCH', date: endDate, rate: rateLunch, eligiblePersons: lunchEligible }
-    ];
     const entitlementIds = nextIdBatch_('ENT', meals.length, 4);
     appendRows_('MEAL_ENTITLEMENTS', meals.map(function (m, i) {
       return {
@@ -249,7 +287,8 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
     lock.releaseLock();
   }
 
-  const couponData = _buildCouponDisplayData_(team.values, packageNumber, eligiblePersons, startDate, endDate, couponId, qrToken);
+  const mealWindowLabel = _mealWindowLabel_(included, startDate, endDate);
+  const couponData = _buildCouponDisplayData_(team.values, packageNumber, eligiblePersons, startDate, endDate, couponId, qrToken, mealWindowLabel);
   const digitalPdf = _generateDigitalCouponPdf_(actorSession, packageId, couponData);
   const printedPdf = _generatePrintedCouponSheet_(actorSession, packageId, couponData, 1);
 
@@ -263,6 +302,7 @@ function purchasePackage_(actorSession, teamId, inchargeMealSelections, dinnerDa
   return {
     packageId: packageId, packageNumber: packageNumber, couponId: couponId, eligiblePersons: eligiblePersons,
     amount: amount, startMeal: startDate, endMeal: endDate, collegeName: team.values.CollegeName,
+    mealsIncluded: included, mealWindowLabel: mealWindowLabel,
     digitalCouponUrl: digitalPdf.pdfUrl, printedCouponUrl: printedPdf.pdfUrl, emailStatus: emailResult.status,
     digitalCouponFileId: digitalPdf.fileId, printedCouponFileId: printedPdf.fileId
   };
