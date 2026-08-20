@@ -1548,6 +1548,53 @@ function test_e2e_fullTeamLifecycle() {
   }
 }
 
+function test_settings_uploadSignature_validatesAndReplacesOldFile() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'a' };
+  const regSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'r' };
+  // A real, minimal 1x1 transparent PNG (67 bytes decoded) — small enough to keep this test
+  // fast, but real enough that DriveApp actually stores content, not an empty file.
+  const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const trashFileIds = [];
+  const originalValue = getSetting_('AccommodationConvenerSignatureFileId', '');
+  try {
+    let threwForbidden = false;
+    try { uploadSignature_(regSession, 'AccommodationConvenerSignatureFileId', tinyPngBase64, 'image/png'); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Admin caller'); }
+    assertTrue_(threwForbidden, 'uploadSignature_ did not reject a non-Admin caller');
+
+    let threwBadKey = false;
+    try { uploadSignature_(adminSession, 'SomeArbitrarySettingsKey', tinyPngBase64, 'image/png'); } catch (err) { threwBadKey = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for a key outside the signature allowlist'); }
+    assertTrue_(threwBadKey, 'uploadSignature_ did not reject a key outside the signature allowlist — this must never write an arbitrary Settings key');
+
+    let threwBadMime = false;
+    try { uploadSignature_(adminSession, 'AccommodationConvenerSignatureFileId', tinyPngBase64, 'application/pdf'); } catch (err) { threwBadMime = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for a non-image mime type'); }
+    assertTrue_(threwBadMime, 'uploadSignature_ did not reject a non-image mime type');
+
+    const first = uploadSignature_(adminSession, 'AccommodationConvenerSignatureFileId', tinyPngBase64, 'image/png');
+    trashFileIds.push(first.fileId);
+    assertTrue_(!!first.fileId, 'uploadSignature_ should create a real Drive file');
+    assertEqual_(getSetting_('AccommodationConvenerSignatureFileId', ''), first.fileId, 'the Settings key should be updated to the new file id');
+    assertTrue_(DriveApp.getFileById(first.fileId).getBlob().getBytes().length > 0, 'the uploaded file should have real content');
+
+    // Re-upload: the OLD file should be trashed, a NEW one created, Settings pointing at the new one.
+    const second = uploadSignature_(adminSession, 'AccommodationConvenerSignatureFileId', tinyPngBase64, 'image/png');
+    trashFileIds.push(second.fileId);
+    assertTrue_(second.fileId !== first.fileId, 'a re-upload should create a new file, not reuse the old one');
+    assertTrue_(DriveApp.getFileById(first.fileId).isTrashed(), 'the previous signature file should be trashed after a re-upload, not left orphaned');
+    assertEqual_(getSetting_('AccommodationConvenerSignatureFileId', ''), second.fileId, 'Settings should now point at the newest file');
+
+    const signatures = getSignatures_(adminSession);
+    assertTrue_(signatures.hasOwnProperty('AccommodationConvenerSignatureFileId'), 'getSignatures_ should include the accommodation convener slot');
+    assertEqual_(signatures.AccommodationConvenerSignatureFileId.fileId, second.fileId, 'getSignatures_ should reflect the latest uploaded file');
+
+    let threwForbidden2 = false;
+    try { getSignatures_(regSession); } catch (err) { threwForbidden2 = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Admin caller'); }
+    assertTrue_(threwForbidden2, 'getSignatures_ did not reject a non-Admin caller');
+  } finally {
+    trashFileIds.forEach(function (id) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* already trashed/gone */ } });
+    setSetting_('AccommodationConvenerSignatureFileId', originalValue, 'test-runner');
+  }
+}
+
 function test_settings_tournamentInfo_updateAndValidate() {
   const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'a' };
   const regSession = { userId: 'USR-0002', role: ROLES.REGISTRATION, sessionId: 'r' };
@@ -2245,6 +2292,7 @@ const TEST_CASES = [
   { name: 'sheetHelpers_findRowsByField', fn: test_sheetHelpers_findRowsByField },
   { name: 'idGenerator_nextDocumentNumber', fn: test_idGenerator_nextDocumentNumber },
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
+  { name: 'settings_uploadSignature_validatesAndReplacesOldFile', fn: test_settings_uploadSignature_validatesAndReplacesOldFile },
   { name: 'settings_mealTimingsValidationAndUpdate', fn: test_settings_mealTimingsValidationAndUpdate },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },

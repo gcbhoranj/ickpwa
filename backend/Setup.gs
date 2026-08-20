@@ -48,7 +48,8 @@ function seedSettings_() {
     Numbering_Accommodation_Padding: '3',
     PrincipalSignatureFileId: '',
     RegistrationInchargeSignatureFileId: '',
-    CollegeSealFileId: '',
+    PrincipalSealFileId: '',
+    AccommodationConvenerSignatureFileId: '',
     AllowSelfTest: 'true'
   };
   return Object.keys(defaults).map(function (key) {

@@ -46,8 +46,7 @@ function _buildNocLayout_(pres, data) {
     0.14, 10, { left: true }
   );
   y += pageHeight * 0.05;
-  addLine('________________________', 0.03, 9, { left: true });
-  addLine('Signature, Accommodation Committee', 0.035, 8, { left: true });
+  _drawSignatureOrLine_(slide, margin, y, contentWidth * 0.45, 'Signature, Accommodation Committee Convener', 'AccommodationConvenerSignatureFileId');
 
   return slide;
 }

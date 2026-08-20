@@ -14,6 +14,17 @@ const ROLES = {
 // contingent incharges). A room only ever accepts allocations of its own type.
 const ROOM_TYPES = { TEAM: 'TEAM', INCHARGE: 'INCHARGE' };
 
+// Settings keys that uploadSignature_ (Settings.gs) is allowed to write — a fixed allowlist,
+// never an arbitrary Settings key, since the upload action is driven by a client-supplied key
+// string. Consumed by FinalDocuments.gs's Final Receipt/Relieving Order layout and Noc.gs's
+// NOC Certificate layout, each via _drawSignatureOrLine_.
+const SIGNATURE_SETTING_KEYS = {
+  RegistrationInchargeSignatureFileId: 'Registration Committee Convener Signature',
+  AccommodationConvenerSignatureFileId: 'Accommodation Committee Convener Signature',
+  PrincipalSignatureFileId: 'Principal Signature',
+  PrincipalSealFileId: 'Principal\'s Seal'
+};
+
 // sheetName -> ordered header row. This IS the schema; SheetHelpers/Setup read from here.
 const SHEET_SCHEMAS = {
   SETTINGS: ['Key', 'Value', 'UpdatedBy', 'UpdatedAt'],

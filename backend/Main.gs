@@ -165,6 +165,14 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return setFinancialLock_(session, !!payload.locked);
   },
+  'admin.settings.uploadSignature': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return uploadSignature_(session, payload.key, payload.base64Data, payload.mimeType);
+  },
+  'admin.settings.getSignatures': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getSignatures_(session);
+  },
   'settings.getRegistrationInfo': function (payload, sessionId) {
     requireSession_(sessionId);
     return getRegistrationInfo_(null);

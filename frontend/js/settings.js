@@ -4,14 +4,47 @@
 // meal timings added in Phase 4 so the future Mess scanning utility (Phase 5) can tell which
 // meal a scan belongs to.
 
+// Max upload size kept small and client-side only — a signature/seal scan has no business
+// being large, and this avoids ever building a many-MB base64 string in the browser or JSON
+// request body for something that should be a few hundred KB at most.
+const SIGNATURE_MAX_BYTES = 3 * 1024 * 1024;
+
+function _readFileAsBase64(file) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      // reader.result is a data: URL ("data:image/png;base64,AAAA...") — the backend wants
+      // just the base64 payload, mimeType is sent separately from file.type.
+      resolve(reader.result.split(',')[1]);
+    };
+    reader.onerror = function () { reject(new Error('Could not read the selected file.')); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function _signatureSlotHtml(key, current) {
+  return (
+    '<div style="margin:12px 0;padding:10px;border:1px solid #ddd;border-radius:8px">' +
+      '<p style="margin:0 0 6px"><strong>' + current.label + '</strong> — ' +
+        (current.fileId
+          ? '<a href="' + current.url + '" target="_blank" rel="noopener">Uploaded (view)</a>'
+          : '<span class="hint">Not uploaded yet</span>') +
+      '</p>' +
+      '<input type="file" accept="image/png,image/jpeg" data-sig-key="' + key + '">' +
+      '<button type="button" class="sig-upload-btn" data-sig-key="' + key + '" style="margin-top:6px">Upload</button>' +
+    '</div>'
+  );
+}
+
 async function renderSettingsScreen(root, user) {
   root.innerHTML = '<div class="wizard-card"><h1>Settings</h1><p>Loading…</p></div>';
   const info = await apiCall('settings.getRegistrationInfo', {});
   const timings = await apiCall('admin.settings.getMealTimings', {});
   const tournamentInfo = await apiCall('admin.settings.getTournamentInfo', {});
-  renderForm(info, timings, tournamentInfo);
+  const signatures = await apiCall('admin.settings.getSignatures', {});
+  renderForm(info, timings, tournamentInfo, signatures);
 
-  function renderForm(info, timings, tournamentInfo) {
+  function renderForm(info, timings, tournamentInfo, signatures) {
     const locked = info.financialSettingsLocked === 'true';
     root.innerHTML =
       '<div class="wizard-card">' +
@@ -56,8 +89,47 @@ async function renderSettingsScreen(root, user) {
           '<button type="submit">Save Meal Timings</button>' +
         '</form>' +
 
+        '<h2 style="margin-top:24px">Signatures &amp; Seals</h2>' +
+        '<p>Uploaded once here, then placed automatically on every Final Receipt, Relieving Order, and NOC Certificate generated from now on. PNG or JPEG, up to 3 MB.</p>' +
+        '<div id="signature-error" class="error" style="display:none"></div>' +
+        Object.keys(signatures).map(function (key) { return _signatureSlotHtml(key, signatures[key]); }).join('') +
+
         '<button id="back-btn" style="margin-top:16px;background:#999">Back</button>' +
       '</div>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('.sig-upload-btn'), function (btn) {
+      btn.addEventListener('click', async function () {
+        const key = btn.getAttribute('data-sig-key');
+        const fileInput = document.querySelector('input[data-sig-key="' + key + '"]');
+        const errEl = document.getElementById('signature-error');
+        errEl.style.display = 'none';
+        const file = fileInput.files[0];
+        if (!file) {
+          errEl.textContent = 'Choose a file first.';
+          errEl.style.display = 'block';
+          return;
+        }
+        if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+          errEl.textContent = 'Signature/seal images must be PNG or JPEG.';
+          errEl.style.display = 'block';
+          return;
+        }
+        if (file.size > SIGNATURE_MAX_BYTES) {
+          errEl.textContent = 'File is too large — please use an image under 3 MB.';
+          errEl.style.display = 'block';
+          return;
+        }
+        try {
+          const base64Data = await _readFileAsBase64(file);
+          await apiCall('admin.settings.uploadSignature', { key: key, base64Data: base64Data, mimeType: file.type });
+          const updatedSignatures = await apiCall('admin.settings.getSignatures', {});
+          renderForm(info, timings, tournamentInfo, updatedSignatures);
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+      });
+    });
 
     document.getElementById('tournament-form').addEventListener('submit', async function (e) {
       e.preventDefault();
@@ -71,7 +143,7 @@ async function renderSettingsScreen(root, user) {
           tournamentStartDate: document.getElementById('tournament-start').value,
           tournamentEndDate: document.getElementById('tournament-end').value
         });
-        renderForm(info, timings, updatedTournamentInfo);
+        renderForm(info, timings, updatedTournamentInfo, signatures);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
@@ -91,7 +163,7 @@ async function renderSettingsScreen(root, user) {
             dari: Number(document.getElementById('rate-dari').value),
             security: Number(document.getElementById('rate-security').value)
           });
-          renderForm(updated, timings, tournamentInfo);
+          renderForm(updated, timings, tournamentInfo, signatures);
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
@@ -105,7 +177,7 @@ async function renderSettingsScreen(root, user) {
       try {
         await apiCall('admin.settings.setFinancialLock', { locked: !locked });
         const refreshed = await apiCall('settings.getRegistrationInfo', {});
-        renderForm(refreshed, timings, tournamentInfo);
+        renderForm(refreshed, timings, tournamentInfo, signatures);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
@@ -126,7 +198,7 @@ async function renderSettingsScreen(root, user) {
           dinnerEnd: document.getElementById('timing-dinner-end').value,
           graceMinutes: Number(document.getElementById('timing-grace').value)
         });
-        renderForm(info, updatedTimings, tournamentInfo);
+        renderForm(info, updatedTimings, tournamentInfo, signatures);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';

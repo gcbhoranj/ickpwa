@@ -135,6 +135,56 @@ function updateTournamentInfo_(actorSession, info) {
   return getTournamentInfo_(actorSession);
 }
 
+// Signature/seal images used on generated documents — Admin uploads once, every future
+// document draws it automatically (_drawSignatureOrLine_, already built in Phase 8 but never
+// fed a real image until now). `key` is checked against the fixed SIGNATURE_SETTING_KEYS
+// allowlist (Constants.gs) — this must never be able to write an arbitrary Settings key just
+// because the caller supplied one. The previous file for a slot (if any) is trashed on
+// re-upload so re-doing a signature doesn't silently accumulate orphaned Drive files forever.
+function uploadSignature_(actorSession, key, base64Data, mimeType) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  if (!SIGNATURE_SETTING_KEYS.hasOwnProperty(key)) {
+    throw apiError_('VALIDATION_ERROR', 'Unknown signature slot: ' + key);
+  }
+  if (mimeType !== 'image/png' && mimeType !== 'image/jpeg') {
+    throw apiError_('VALIDATION_ERROR', 'Signature image must be PNG or JPEG.');
+  }
+  if (!base64Data) throw apiError_('VALIDATION_ERROR', 'No image data received.');
+
+  const decoded = Utilities.base64Decode(base64Data);
+  const extension = mimeType === 'image/png' ? 'png' : 'jpg';
+  const blob = Utilities.newBlob(decoded, mimeType, key + '.' + extension);
+
+  const signaturesFolder = _ensureSubfolder_(_getRootFolder_(), 'Signatures');
+  const file = signaturesFolder.createFile(blob);
+
+  const previousFileId = getSetting_(key, '');
+  setSetting_(key, file.getId(), actorSession.userId);
+  if (previousFileId) {
+    try { DriveApp.getFileById(previousFileId).setTrashed(true); } catch (err) { /* already gone — nothing to clean up */ }
+  }
+
+  appendRow_('AUDIT_LOG', {
+    AuditId: nextId_('AUD', 7), Timestamp: new Date().toISOString(), UserId: actorSession.userId, Role: actorSession.role,
+    Action: 'UPLOAD_SIGNATURE', Entity: 'SETTINGS', EntityId: key, PreviousState: previousFileId, NewState: file.getId()
+  });
+
+  return { key: key, fileId: file.getId(), url: 'https://drive.google.com/file/d/' + file.getId() + '/view' };
+}
+
+function getSignatures_(actorSession) {
+  requireRole_(actorSession, [ROLES.ADMIN]);
+  const result = {};
+  Object.keys(SIGNATURE_SETTING_KEYS).forEach(function (key) {
+    const fileId = getSetting_(key, '');
+    result[key] = {
+      label: SIGNATURE_SETTING_KEYS[key], fileId: fileId || null,
+      url: fileId ? 'https://drive.google.com/file/d/' + fileId + '/view' : null
+    };
+  });
+  return result;
+}
+
 function setFinancialLock_(actorSession, locked) {
   requireRole_(actorSession, [ROLES.ADMIN]);
   const now = new Date().toISOString();

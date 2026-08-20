@@ -893,3 +893,50 @@ status string, but only once departure was already in progress).
   script to get a genuine RED before restoring the implementation, same discipline as every
   earlier group. Verified green, then regression-checked 5 related existing tests, all clean.
   Service worker bumped to v28.
+
+## 2026-08-20 — Post-launch feedback, Group E: signatures & seals
+
+Fifth and final sub-project. `PrincipalSignatureFileId`/`RegistrationInchargeSignatureFileId`/
+`CollegeSealFileId` were reserved since Phase 1, and `_drawSignatureOrLine_` (Phase 8) already
+knew how to draw a real image from a Settings file-id key — but nothing in the app could ever
+get an image into Drive in the first place, and `PrincipalSignatureFileId` was never actually
+wired into any document layout despite being seeded. Confirmed the exact mapping with the human
+partner before building (their two decisions): the "Principal's Seal" is the existing College
+Seal slot renamed (nothing to migrate — no signature has ever been uploaded in this app's
+history), and the NOC Certificate only needs the Accommodation Convener's signature, not the
+Principal's too.
+
+- **New `uploadSignature_`** (`Settings.gs`, ADMIN only) — the first file-upload capability
+  anywhere in this app. Base64-encoded image comes through the same JSON envelope every other
+  action uses (no multipart support in this framework); validated against a fixed
+  `SIGNATURE_SETTING_KEYS` allowlist (`Constants.gs`) so a client-supplied `key` can never
+  write an arbitrary Settings row, and against a PNG/JPEG mime-type allowlist. Stores into a new
+  `Signatures` Drive subfolder, trashes the previous file for that slot on re-upload so
+  redoing a signature doesn't accumulate orphaned files, updates the Settings key. New
+  `getSignatures_` read action for the Settings screen.
+- **Four slots**: `RegistrationInchargeSignatureFileId`, `PrincipalSignatureFileId` (both
+  existing keys, the latter newly wired into documents for the first time),
+  `PrincipalSealFileId` (renamed from `CollegeSealFileId`), `AccommodationConvenerSignatureFileId`
+  (new).
+- **Document layouts updated**: Final Receipt and Relieving Order's 2-block signature row
+  (Registration Convener | College Seal) becomes 3 blocks (Registration Convener | Principal |
+  Principal's Seal). NOC Certificate's plain "Signature, Accommodation Committee" text line
+  becomes a real `_drawSignatureOrLine_` image block.
+- **Frontend**: new "Signatures & Seals" section on the Admin Settings screen — one upload slot
+  per key (PNG/JPEG, 3 MB client-side cap), status + a view link once uploaded, `FileReader` →
+  base64 → the existing `apiCall` envelope.
+- **Testing**: TDD, watched fail live before implementing (`uploadSignature_`/`getSignatures_`
+  role gate, allowlist rejection for both key and mime-type, real Drive file creation, and
+  old-file cleanup on re-upload — verified via `DriveApp.getFileById(...).isTrashed()`, not just
+  a returned status). Regression-checked all 6 tests touching the three changed document
+  layouts (NOC grant/decline/auto-vacate, finalize+email, number-to-words) plus 6 more touching
+  Setup/Settings/Constants — all clean **except** two pre-existing failures unrelated to this
+  group: `FinancialSettingsLocked` is currently `true` live (real production state, evidenced
+  directly in the tests' own error messages — no Group E code touches that setting), flagged to
+  the human partner rather than silently unlocked.
+- Service worker bumped to v29.
+
+**All five sub-projects from the original UAT feedback pass are now complete**: A (tournament
+info sync, receipt/relieving visibility, NOC auto-vacate, refund hint), B (transaction toasts),
+C (coupon/Final-Documents email — diagnosed, fixed, and confirmed live-`SENT`), D (NOC decline +
+remarks), E (signatures & seals). Deployed to production Apps Script @142.

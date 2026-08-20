@@ -119,8 +119,9 @@ function _buildFinalReceiptLayout_(pres, data) {
   );
   y += pageHeight * 0.03;
 
-  _drawSignatureOrLine_(slide, margin, y, contentWidth * 0.45, 'Signature, Registration Committee Convener', 'RegistrationInchargeSignatureFileId');
-  _drawSignatureOrLine_(slide, margin + contentWidth * 0.55, y, contentWidth * 0.45, 'College Seal', 'CollegeSealFileId');
+  _drawSignatureOrLine_(slide, margin, y, contentWidth * 0.30, 'Signature, Registration Committee Convener', 'RegistrationInchargeSignatureFileId');
+  _drawSignatureOrLine_(slide, margin + contentWidth * 0.35, y, contentWidth * 0.30, 'Signature, Principal', 'PrincipalSignatureFileId');
+  _drawSignatureOrLine_(slide, margin + contentWidth * 0.70, y, contentWidth * 0.30, 'Principal\'s Seal', 'PrincipalSealFileId');
 
   return slide;
 }
@@ -165,8 +166,9 @@ function _buildRelievingLayout_(pres, data) {
   );
   y += pageHeight * 0.06;
 
-  _drawSignatureOrLine_(slide, margin, y, contentWidth * 0.45, 'Signature, Registration Committee Convener', 'RegistrationInchargeSignatureFileId');
-  _drawSignatureOrLine_(slide, margin + contentWidth * 0.55, y, contentWidth * 0.45, 'College Seal', 'CollegeSealFileId');
+  _drawSignatureOrLine_(slide, margin, y, contentWidth * 0.30, 'Signature, Registration Committee Convener', 'RegistrationInchargeSignatureFileId');
+  _drawSignatureOrLine_(slide, margin + contentWidth * 0.35, y, contentWidth * 0.30, 'Signature, Principal', 'PrincipalSignatureFileId');
+  _drawSignatureOrLine_(slide, margin + contentWidth * 0.70, y, contentWidth * 0.30, 'Principal\'s Seal', 'PrincipalSealFileId');
 
   return slide;
 }
