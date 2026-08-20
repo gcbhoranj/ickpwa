@@ -259,6 +259,15 @@ async function renderTeamDetail(root, user, teamId) {
             : '<p>No receipt generated yet.</p>') +
           (relievingOrder
             ? '<a href="https://drive.google.com/file/d/' + relievingOrder.PdfFileId + '/view" target="_blank" rel="noopener"><button type="button" style="margin-left:8px">View Relieving Order</button></a>'
+            : '') +
+          // Accommodation's decision (and, if declined, why) — visible here without navigating
+          // into Accommodation's own screen or waiting for the Departure screen to surface it.
+          (data.nocStatus
+            ? '<p style="margin-top:12px">Accommodation NOC: <strong>' + data.nocStatus.status + '</strong>' +
+              (data.nocStatus.status === 'DECLINED' && data.nocStatus.notes ? ' — ' + data.nocStatus.notes : '') +
+              (data.nocStatus.status === 'NOC_GRANTED' && data.nocStatus.pdfUrl
+                ? ' <a href="' + data.nocStatus.pdfUrl + '" target="_blank" rel="noopener">View Certificate</a>' : '') +
+              '</p>'
             : '')
         : '') +
       (user.role !== 'ACCOMMODATION' ? '<button id="packages-btn" style="margin-top:12px">Food Packages</button>' : '') +

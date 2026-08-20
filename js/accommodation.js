@@ -195,9 +195,14 @@ async function renderNocScreen(root, user, teamId, registrationNumber, collegeNa
         '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + '</p>' +
         '<div id="noc-error" class="error" style="display:none"></div>' +
         '<p>Status: <strong>' + status.status + '</strong></p>' +
+        (status.status === 'DECLINED' && status.notes
+          ? '<p class="hint">Previous decline remarks: ' + status.notes + '</p>'
+          : '') +
         (status.status === 'NOC_GRANTED'
           ? '<a href="' + status.pdfUrl + '" target="_blank" rel="noopener"><button type="button">View NOC Certificate</button></a>'
-          : '<button id="grant-btn">Grant NOC</button>') +
+          : '<button id="grant-btn">Grant NOC</button>' +
+            '<label style="margin-top:16px">Decline Remarks (required to decline)<textarea id="decline-remarks" rows="3"></textarea></label>' +
+            '<button id="decline-btn" style="background:#999">Decline NOC</button>') +
         '<button id="back-btn" style="margin-top:12px">Back</button>' +
       '</div>';
 
@@ -207,7 +212,19 @@ async function renderNocScreen(root, user, teamId, registrationNumber, collegeNa
         errEl.style.display = 'none';
         try {
           const granted = await apiCall('accommodation.noc.issue', { teamId: teamId });
-          render({ status: 'NOC_GRANTED', pdfUrl: granted.pdfUrl });
+          render({ status: 'NOC_GRANTED', pdfUrl: granted.pdfUrl, notes: '' });
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+      });
+      document.getElementById('decline-btn').addEventListener('click', async function () {
+        const errEl = document.getElementById('noc-error');
+        errEl.style.display = 'none';
+        const remarks = document.getElementById('decline-remarks').value.trim();
+        try {
+          const declined = await apiCall('accommodation.noc.decline', { teamId: teamId, remarks: remarks });
+          render({ status: 'DECLINED', notes: declined.notes });
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
