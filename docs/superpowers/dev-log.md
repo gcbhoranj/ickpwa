@@ -653,3 +653,31 @@ OtherAdjustments`.
   full finalize-flow integration test — NOC gating, real PDF generation for both documents,
   RELIEVED status, lock release, and an idempotent-repeat check that confirms a second finalize
   call returns the same receipt rather than creating a duplicate) passed.
+
+## 2026-08-20 — Phase 9: dashboard, reports, audit log
+
+Another "§75 of the original prompt" citation with no recoverable text behind it — but unlike
+Phase 7's refund rule, reports are pure read-only aggregation of data that already exists (no
+money moves, nothing is decided), so definitions were proposed and approved rather than left
+blocking. Admin-only, matching the spec's own screen map (§13) — Reports/Dashboard/Audit Log
+were never in Registration/Mess/Accommodation's nav.
+
+- **One combined read action**, `reports.getAll` — the human partner again asked for a speedy
+  app flow, so the whole Reports screen (5 tabs) loads from a single round trip: dashboard
+  summary, per-team financial/food reports (every team, live), accommodation (room list +
+  per-team status), departure pipeline, and a college-wise final statement scoped to teams with
+  a finalized settlement only (Phase 8's output) — distinct from the financial report, which
+  shows every team's running totals regardless of settlement status.
+- `reports.auditLog` kept separate (different data, fetched on demand): most recent 200 rows,
+  Admin sees everything, any other role would be scoped to their own `UserId` — enforced
+  server-side per this project's established "the frontend hiding a button is never the
+  enforcement point" rule, even though no other role's nav currently reaches an Audit Log
+  screen at all.
+- **Frontend**: replaced `app.js`'s long-standing placeholder Admin landing ("Other screens are
+  built in a later phase," present since Phase 1) with a real `renderAdminDashboard` in new
+  `reports.js` — fetches the bundle once and passes it straight into a tab-switched Reports
+  screen, so switching tabs is instant with no additional network call.
+- No new sheets or columns — every report reads sheets every earlier phase already populated.
+  Verified live: `fast` tier 36/36, including both new tests (non-Admin `FORBIDDEN` rejection
+  plus per-team aggregation correctness for the reports bundle; Admin-vs-scoped-own-rows
+  behavior for the audit log).
