@@ -1151,6 +1151,71 @@ function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
   }
 }
 
+function test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'y' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Reports Test College', 'District', 5, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+    calculateCharges_(regSession, createdTeamId, true, true);
+    recordPayment_(regSession, createdTeamId, 'Cash');
+
+    let threwForbidden = false;
+    try { getReportsBundle_(regSession); } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for non-Admin caller'); }
+    assertTrue_(threwForbidden, 'getReportsBundle_ should reject non-Admin callers');
+
+    const bundle = getReportsBundle_(adminSession);
+    assertTrue_(bundle.dashboard.totalTeams >= 1, 'dashboard should count at least this one team');
+
+    const financialRow = bundle.financial.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!financialRow, 'financial report should include the new team');
+    assertTrue_(financialRow.dariCharges > 0, 'financial row should reflect the calculated Dari charges');
+    assertEqual_(financialRow.settled, false, 'a freshly registered team should not be settled yet');
+
+    const foodRow = bundle.food.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertTrue_(!!foodRow, 'food report should include the new team');
+
+    const accomRow = bundle.accommodation.teams.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertEqual_(accomRow.teamMembersNeeded, 5, 'accommodation report should reflect the team member count');
+
+    const departureRow = bundle.departure.filter(function (r) { return r.teamId === createdTeamId; })[0];
+    assertEqual_(departureRow.status, 'REGISTERED', 'departure report should reflect the current team status');
+
+    assertTrue_(!bundle.collegeWiseFinalStatement.some(function (r) { return r.teamId === createdTeamId; }), 'an unsettled team should not appear in the final statement');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('PAYMENTS', 'TeamId', createdTeamId).forEach(function (p) { deleteRowById_('PAYMENTS', 'PaymentId', p.PaymentId); });
+      findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
+function test_reports_auditLog_scopesToOwnActionsForNonAdmin() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-9999', role: ROLES.ADMIN, sessionId: 'y' };
+  let createdTeamId = null;
+  try {
+    const team = registerTeam_(regSession, 'Audit Log Test College', 'District', 3, [{ name: 'Coach', isPrimary: true }]);
+    createdTeamId = team.teamId;
+
+    const asRegistration = getAuditLog_(regSession, 500);
+    assertTrue_(asRegistration.every(function (r) { return r.UserId === 'USR-0001'; }), 'non-Admin should only see their own audit rows');
+    assertTrue_(asRegistration.some(function (r) { return r.EntityId === createdTeamId; }), 'non-Admin audit log should include their own recent action');
+
+    const asAdmin = getAuditLog_(adminSession, 500);
+    assertTrue_(asAdmin.some(function (r) { return r.EntityId === createdTeamId; }), 'Admin audit log should include actions from every user');
+    assertTrue_(asAdmin.length >= asRegistration.length, 'Admin should see at least as many rows as a scoped non-Admin view');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+  }
+}
+
 // Structural checks only — this cannot verify a matrix actually decodes on a real scanner
 // (that requires a physical device test, tracked separately). Catches gross encoding bugs:
 // wrong dimensions, missing finder/format patterns, data not actually affecting output.
@@ -1828,6 +1893,8 @@ const TEST_CASES = [
   { name: 'departure_lockLifecycle', fn: test_departure_lockLifecycle },
   { name: 'departure_fullRefundFlow', fn: test_departure_fullRefundFlow },
   { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
+  { name: 'reports_getAll_adminOnlyAndAggregatesTeamCorrectly', fn: test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly },
+  { name: 'reports_auditLog_scopesToOwnActionsForNonAdmin', fn: test_reports_auditLog_scopesToOwnActionsForNonAdmin },
   { name: 'foodPackages_messRoleParity', fn: test_foodPackages_messRoleParity, tier: 'pdf1' },
   { name: 'mess_timeWindowMath', fn: test_mess_timeWindowMath },
   { name: 'mess_currentMeal_picksConfiguredWindow', fn: test_mess_currentMeal_picksConfiguredWindow },

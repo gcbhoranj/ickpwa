@@ -294,6 +294,14 @@ const ACTIONS = {
   'departure.finalize': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return finalizeDepartureAndGenerateDocuments_(session, payload.teamId, payload.otherAdjustments, payload.relievingSession, payload.relievingDate, payload.recipientEmails);
+  },
+  'reports.getAll': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getReportsBundle_(session);
+  },
+  'reports.auditLog': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { entries: getAuditLog_(session, payload.limit) };
   }
 };
 
