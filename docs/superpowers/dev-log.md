@@ -1107,3 +1107,124 @@ rounds after seeing the real numbers:
   retry, not a real regression).
 - Deployed to production Apps Script @150 (@149 tests-only RED, @150 implementation). No
   frontend changes this round.
+
+## 2026-08-21 — Match Fee Collection: new module, Registration Committee portal
+
+New module, not a phase correction — a separate financial stream where every match produces
+up to two independent per-team payments and receipts. Spec:
+`docs/superpowers/specs/2026-08-21-match-fee-collection-design.md`. Plan:
+`docs/superpowers/plans/2026-08-21-match-fee-collection.md` (7 tasks). Built entirely by
+reusing existing architecture — no new numbering engine, PDF pipeline, email system, or lock
+concept.
+
+1. **Two new sheets, no caching of derived state.** `MATCHES` (identity only: MatchId/
+   MatchNumber/MatchDate/Team1Id/Team2Id/Status) and `MATCH_FEE_TRANSACTIONS` (one row per
+   team-payment). Deliberately does NOT store per-team PAID/PENDING or receipt numbers on
+   `MATCHES` — `_matchTeamSideStatus_` always computes "has this team paid" live from
+   `MATCH_FEE_TRANSACTIONS` (exactly one `Status=ACTIVE` row per `(MatchId, TeamId)` — the
+   core invariant every duplicate-payment/void/re-collect rule is built around), the same
+   philosophy `TEAMS` already uses for its own charges/payments/receipts.
+2. **Receipt numbering reuses `nextDocumentNumber_` unmodified.** New counters
+   `Numbering_Match_Prefix='M-'` (→ `M-001`, `M-002`, …) and
+   `Numbering_MatchFee_Prefix='GCB/HPUICK-2026/MF/'`/`Padding='5'` (→ exactly
+   `GCB/HPUICK-2026/MF/00001`, the exact format required) — same lock-protected global
+   counter every other document number already uses, so "transaction-safe, never duplicated
+   under concurrent operators" needed zero new code.
+3. **Match Fee rate folded into the existing rates form/lock, not a second lock.**
+   `MatchFeeRate` added as a sixth field inside `updateRates_`/`getRegistrationInfo_`,
+   gated by the same `FinancialSettingsLocked` flag as breakfast/lunch/dinner/dari/security.
+   Each transaction snapshots `MatchFeeRate` into `RateSnapshot` at payment time — a later
+   Admin rate change never touches an already-created transaction's `Amount` or PDF
+   (mirrors `CHARGES.RateDariSnapshot`'s existing rate-locking pattern exactly).
+4. **`collectMatchFee_` mirrors `purchasePackage_`'s idempotency/locking shape** (pre-lock
+   `ClientRequestId` fast path, authoritative re-check inside `LockService.getScriptLock()`,
+   the one-ACTIVE-per-pair invariant re-checked inside the same lock) **and
+   `finalizeDepartureAndGenerateDocuments_`'s fast-path-then-generate shape** (transaction
+   row written and lock released BEFORE the PDF/email work, so a PDF or email failure can
+   never leave a payment unrecorded). A duplicate attempt throws `ALREADY_PAID` carrying the
+   existing receipt number, which the frontend renders as View/Resend with no second Pay
+   control.
+5. **Void → re-collect, never delete.** `voidMatchFeeTransaction_` (ADMIN only, mandatory
+   reason) updates the same row in place (`Status=VOID`, `VoidReason`/`VoidedBy`/`VoidedAt`)
+   — the receipt number is retained, never reused, and the global counter is never rewound.
+   Once voided, the `(MatchId, TeamId)` pair has zero `ACTIVE` rows again, so a legitimate
+   re-collection runs the full payment flow from scratch: new transaction, new rate
+   snapshot (the *current* rate), new receipt number, new PDF, new email. Both rows remain
+   permanently visible in history.
+6. **Own receipt PDF, own template, own Drive folder — never touches the Final Receipt.**
+   `_buildMatchFeeReceiptLayout_`/`createMatchFeeReceiptTemplate_` mirror `Receipts.gs`'s
+   Temporary Receipt Template exactly (A5 portrait, one-time manual resize, content built
+   fresh per receipt, never `replaceAllText`). Title "MATCH FEE RECEIPT"; reuses
+   `_numberToWordsIndian_` and `_drawSignatureOrLine_('RegistrationInchargeSignatureFileId')`
+   as-is from `FinalDocuments.gs` — no duplication, Apps Script's single global namespace
+   made this literal reuse. Email defaults to the *paying* team's incharges only (never the
+   opponent's — no code path here even reads the opponent's incharges), status stored as
+   `SENT`/`FAILED`/`NOT_SENT`, matching `FOOD_PACKAGES.EmailStatus`'s existing vocabulary
+   exactly rather than inventing a new one.
+7. **Isolation from Final Receipt/settlement is structural, not just convention.**
+   `FinalDocuments.gs`, `_computeSettlementPreview_`, `SETTLEMENTS`, and `RECEIPTS`
+   (Type=FINAL) are untouched by this module — nothing added here writes to those sheets or
+   is called from that file. `test_matchfee_doesNotAffectFinalReceiptSettlement` is the
+   concrete regression test: computes `_computeSettlementPreview_` for a team before and
+   after a Match Fee transaction exists and asserts every field identical.
+8. **Reports/dashboard get their own separate Match Fee section**, computed in
+   `getReportsBundle_` from `MATCHES`/`MATCH_FEE_TRANSACTIONS` only — never merged into
+   `financial` or `collegeWiseFinalStatement`. New "Match Fee" tab in `reports.js` (same
+   tab-switched-over-one-fetched-bundle pattern), four new lines on the Admin dashboard.
+9. **Frontend**: new `matchfee.js` — a Matches list (doubles as the required Match Fee
+   history screen, since both need the same `matchfee.match.list` data), Create Match (two
+   team `<select>`s from the existing `registration.teams.list` action, never free text —
+   picking a team in one selector removes it from the other's options client-side, while
+   `matchfee.match.create`'s distinct-teams check is the real enforcement), and Match Detail
+   (the two-team-card PAID/PENDING layout from the original request, Collect/View/Resend
+   per side, Admin-only inline Void form). One new "Match Fee Collection" button on the
+   Registration dashboard; one new rate field in Settings. Service worker bumped to v32.
+
+**A real environmental snag, not a code defect**: `FinancialSettingsLocked` was genuinely
+`true` in production when this was built (real Admin prep for the actual tournament) — two
+new/modified tests (`settings_updateRatesAndLock`, extended for `matchFee`; and
+`matchfee_collectMatchFee_fullPaymentAndProtectionFlow`) originally assumed an unlocked
+starting state the way the pre-existing test already (incorrectly) did, and failed live
+against real prod state. Fixed by capturing the actual `financialSettingsLocked`/rate values
+at test start and restoring them exactly at the end (temporarily unlocking only if the real
+state was locked) instead of assuming or hardcoding a state — a correctness fix that also
+happens to close a latent bug in the pre-existing test, which used to unconditionally force
+the lock to `false` at the end regardless of what it found.
+
+Also confirmed pre-existing and unrelated to this change: `setup_schemaAndSettingsIdempotent`
+fails against the current live Sheet because it hardcodes an expectation that
+`FinancialSettingsLocked` defaults to `'false'` — `seedSettings_` only sets a key once and
+never touches it again, so this is just asserting against the real Admin's current locked
+state, not a regression. Left as-is (out of scope for this task); flagged for the human
+partner.
+
+**Testing**: TDD throughout — each of the 7 plan tasks written test-first, deployed, and
+watched live before/after. All new/modified tests confirmed PASS on the live deployment:
+`setup_matchFeeSchemaAndSettingsSeeded`, `idGenerator_matchAndMatchFeeDocumentNumberFormats`,
+`settings_updateRatesAndLock`, `matchfee_createMatch_validatesTeamsAndListsDetail` (fast
+tier); `matchfee_collectMatchFee_fullPaymentAndProtectionFlow` (both-orders-of-payment,
+duplicate-payment rejection with receipt number attached, `ClientRequestId` replay
+idempotency, rate-change-after-payment immutability), `matchfee_doesNotAffectFinalReceiptSettlement`,
+`matchfee_resendAndVoidThenRecollect` (resend reuses the same receipt, void requires
+ADMIN+reason, double-void rejected, re-collection after void gets a new transaction/receipt
+number while the voided row stays in history) (`pdf2` tier, real Slides/Drive PDF generation
++ real Gmail sends each run). `reports_getAll_includesMatchFeeSeparately` (fast tier) confirms
+the report/dashboard aggregation and that the financial report's Dari/package figures stay at
+0 for a Match-Fee-only team. Full `fast` and `pdf2` tier runs now exceed the 6-minute Apps
+Script execution ceiling with these additions (same growing-suite issue this log has already
+flagged four times) — spot-checked adjacent pre-existing tests instead
+(`sheetHelpers_appendFindUpdateDelete`, `idGenerator_sequentialAndUnique`,
+`registration_registerTeam_validationAndCreation`, `settings_mealTimingsValidationAndUpdate`,
+`reports_getAll_adminOnlyAndAggregatesTeamCorrectly`,
+`departure_finalizeGeneratesDocumentsAndReliefsTeam`, `finalDocuments_pdfsAreLinkShareable`,
+`accommodation_issueNoc`) — all green, no regressions. A `fast`/`pdf2` tier re-split is its
+own follow-up, out of scope here, same as every prior time this has come up.
+
+One-time Admin setup performed live: `admin.bootstrap.setupDriveFolders` (adds the "Match Fee
+Receipts" subfolder) and `admin.bootstrap.createMatchFeeReceiptTemplate` (new template file,
+A5 default size — needs the same one-time manual Slides UI resize as every other receipt
+template before it's used for real).
+
+Deployed to production Apps Script @156 (@151-152 Task 1, @153 Task 2, @154 Task 3, @155
+Tasks 4-5, @156 Task 3 test lock-state fix). Frontend (`matchfee.js`, dashboard/settings/
+reports wiring, service worker v32) pushed to the `ickpwa` GitHub Pages repo.
