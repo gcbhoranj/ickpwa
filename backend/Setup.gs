@@ -46,6 +46,13 @@ function seedSettings_() {
     Numbering_Accommodation_Prefix: 'GCB/HPUICK/Room-',
     Numbering_Accommodation_Next: '1',
     Numbering_Accommodation_Padding: '3',
+    MatchFeeRate: '500',
+    Numbering_Match_Prefix: 'M-',
+    Numbering_Match_Next: '1',
+    Numbering_Match_Padding: '3',
+    Numbering_MatchFee_Prefix: 'GCB/HPUICK-2026/MF/',
+    Numbering_MatchFee_Next: '1',
+    Numbering_MatchFee_Padding: '5',
     PrincipalSignatureFileId: '',
     RegistrationInchargeSignatureFileId: '',
     PrincipalSealFileId: '',
@@ -78,7 +85,8 @@ function resetTournamentData_(actorSession, confirm) {
     'TEAMS', 'CONTINGENT_INCHARGES', 'PAYMENTS', 'CHARGES', 'FOOD_PACKAGES', 'FOOD_COUPONS',
     'PACKAGE_INCHARGE_MEALS', 'PRINTED_COUPONS', 'MEAL_ENTITLEMENTS', 'MEAL_USAGE',
     'MEAL_ORDER_STATUS', 'ROOMS', 'ACCOMMODATION', 'ACCOMMODATION_NOC', 'REFUNDS',
-    'SECURITY_REFUNDS', 'SETTLEMENTS', 'RECEIPTS', 'RELIEVING', 'DOCUMENTS', 'EMAIL_LOG', 'AUDIT_LOG'
+    'SECURITY_REFUNDS', 'SETTLEMENTS', 'RECEIPTS', 'RELIEVING', 'DOCUMENTS', 'EMAIL_LOG', 'AUDIT_LOG',
+    'MATCHES', 'MATCH_FEE_TRANSACTIONS'
   ];
   sheetsToClear.forEach(function (name) {
     const sheet = getSheet_(name);
@@ -86,7 +94,7 @@ function resetTournamentData_(actorSession, confirm) {
     if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, SHEET_SCHEMAS[name].length).clearContent();
   });
 
-  ['Registration', 'Receipt', 'Coupon', 'Refund', 'Relieving', 'Accommodation'].forEach(function (type) {
+  ['Registration', 'Receipt', 'Coupon', 'Refund', 'Relieving', 'Accommodation', 'Match', 'MatchFee'].forEach(function (type) {
     setSetting_('Numbering_' + type + '_Next', '1', actorSession.userId);
   });
 

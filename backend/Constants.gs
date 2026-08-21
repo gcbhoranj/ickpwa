@@ -86,7 +86,13 @@ const SHEET_SCHEMAS = {
   EMAIL_LOG: ['EmailId', 'DocumentId', 'Recipient', 'Subject', 'SentAt', 'User', 'Status',
     'ErrorMessage'],
   AUDIT_LOG: ['AuditId', 'Timestamp', 'UserId', 'Role', 'Action', 'Entity', 'EntityId',
-    'PreviousState', 'NewState']
+    'PreviousState', 'NewState'],
+  MATCHES: ['MatchId', 'MatchNumber', 'MatchDate', 'Team1Id', 'Team2Id', 'Status',
+    'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
+  MATCH_FEE_TRANSACTIONS: ['TransactionId', 'MatchId', 'TeamId', 'OpponentTeamId', 'Amount',
+    'RateSnapshot', 'PaymentMethod', 'PaidAt', 'CollectedBy', 'ReceiptNumber',
+    'ReceiptPdfFileId', 'EmailStatus', 'Status', 'VoidReason', 'VoidedBy', 'VoidedAt',
+    'ClientRequestId', 'CreatedBy', 'CreatedAt']
 };
 
 // sheetName -> ID prefix. SETTINGS (keyed) and SESSIONS (opaque random) intentionally excluded.
@@ -96,7 +102,8 @@ const ID_PREFIXES = {
   MEAL_ENTITLEMENTS: 'ENT', MEAL_USAGE: 'USG', MEAL_ORDER_STATUS: 'STA', ROOMS: 'ROOM',
   ACCOMMODATION: 'ALLOC', ACCOMMODATION_NOC: 'NOC', REFUNDS: 'REF',
   SECURITY_REFUNDS: 'SREF', SETTLEMENTS: 'SETL', RECEIPTS: 'RCT', RELIEVING: 'REL',
-  DOCUMENTS: 'DOC', EMAIL_LOG: 'EML', AUDIT_LOG: 'AUD', USERS: 'USR', LOGIN_LOG: 'LOG'
+  DOCUMENTS: 'DOC', EMAIL_LOG: 'EML', AUDIT_LOG: 'AUD', USERS: 'USR', LOGIN_LOG: 'LOG',
+  MATCHES: 'MATCH', MATCH_FEE_TRANSACTIONS: 'MFTX'
 };
 
 // Wider zero-padding for high-volume append-only logs (spec §4).

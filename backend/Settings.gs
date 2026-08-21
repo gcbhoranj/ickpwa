@@ -11,6 +11,7 @@ function getRegistrationInfo_(actorSession) {
     rateDinner: getSetting_('RateDinner', '0'),
     rateDari: getSetting_('RateDari', '0'),
     securityAmount: getSetting_('SecurityAmount', '0'),
+    matchFeeRate: getSetting_('MatchFeeRate', '0'),
     financialSettingsLocked: getSetting_('FinancialSettingsLocked', 'false')
   };
 }
@@ -20,7 +21,7 @@ function updateRates_(actorSession, rates) {
   if (getSetting_('FinancialSettingsLocked', 'false') === 'true') {
     throw apiError_('SETTINGS_LOCKED', 'Financial settings are locked. Unlock before changing rates.');
   }
-  ['breakfast', 'lunch', 'dinner', 'dari', 'security'].forEach(function (key) {
+  ['breakfast', 'lunch', 'dinner', 'dari', 'security', 'matchFee'].forEach(function (key) {
     if (rates[key] === undefined || rates[key] === null || isNaN(Number(rates[key])) || Number(rates[key]) < 0) {
       throw apiError_('VALIDATION_ERROR', 'Rate "' + key + '" must be a non-negative number.');
     }
@@ -31,6 +32,7 @@ function updateRates_(actorSession, rates) {
   setSetting_('RateDinner', String(rates.dinner), actorSession.userId);
   setSetting_('RateDari', String(rates.dari), actorSession.userId);
   setSetting_('SecurityAmount', String(rates.security), actorSession.userId);
+  setSetting_('MatchFeeRate', String(rates.matchFee), actorSession.userId);
   appendRow_('AUDIT_LOG', {
     AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
     Action: 'UPDATE_RATES', Entity: 'SETTINGS', EntityId: 'RATES', PreviousState: '', NewState: JSON.stringify(rates)
