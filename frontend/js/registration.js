@@ -7,6 +7,7 @@ function renderRegistrationDashboard(root, user) {
       '<p class="subtitle">Registration Committee</p>' +
       '<button id="register-team-btn">Register New Team</button>' +
       '<button id="view-teams-btn">Teams</button>' +
+      '<button id="match-fee-btn">Match Fee Collection</button>' +
       '<button id="logout-btn">Log Out</button>' +
     '</div>';
   document.getElementById('register-team-btn').addEventListener('click', function () {
@@ -14,6 +15,9 @@ function renderRegistrationDashboard(root, user) {
   });
   document.getElementById('view-teams-btn').addEventListener('click', function () {
     navigateTo(renderTeamsList, root, user);
+  });
+  document.getElementById('match-fee-btn').addEventListener('click', function () {
+    navigateTo(renderMatchFeeList, root, user);
   });
   document.getElementById('logout-btn').addEventListener('click', async function () {
     await logout();

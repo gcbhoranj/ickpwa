@@ -17,6 +17,7 @@ async function renderAdminDashboard(root, user) {
       '<p>Food Refunds: Rs ' + d.totalFoodRefunds + ' &middot; Security Refunds: Rs ' + d.totalSecurityRefunds + '</p>' +
       '<p>Team Rooms: ' + d.roomsTeam.allocated + '/' + d.roomsTeam.capacity + ' allocated &middot; Incharge Rooms: ' + d.roomsIncharge.allocated + '/' + d.roomsIncharge.capacity + ' allocated</p>' +
       '<p>NOC Granted: ' + d.nocGrantedCount + ' &middot; Pending: ' + d.nocPendingCount + '</p>' +
+      '<p>Match Fee — Collected: Rs ' + d.matchFeeCollected + ' &middot; Pending Team Payments: ' + d.matchFeePending + ' &middot; Team Payments: ' + d.matchFeeTeamPayments + ' &middot; Receipts: ' + d.matchFeeReceiptsGenerated + '</p>' +
       '<button id="manage-users-btn" style="margin-top:12px">Manage Users</button>' +
       '<button id="settings-btn">Settings</button>' +
       '<button id="rooms-btn">Rooms</button>' +
@@ -64,6 +65,15 @@ function _renderReportTab(tab, bundle) {
         return '<tr><td>' + r.registrationNumber + '</td><td>' + r.collegeName + '</td><td>' + r.status + '</td><td>' + (r.departureLockedBy || '—') + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
+  if (tab === 'matchFee') {
+    const s = bundle.matchFee.summary;
+    return '<p>Total Collected: Rs ' + s.totalCollected + ' &middot; Matches: ' + s.matchesCount + ' &middot; Team Payments: ' + s.teamPaymentsCount + ' &middot; Pending: ' + s.pendingCount + '</p>' +
+      '<p>Cash: Rs ' + s.cashCollected + ' &middot; Online: Rs ' + s.onlineCollected + ' &middot; Cheque: Rs ' + s.chequeCollected + '</p>' +
+      '<table><thead><tr><th>Match No</th><th>Date</th><th>Paying Team</th><th>Opponent</th><th>Amount</th><th>Receipt No.</th><th>Method</th><th>Paid At</th><th>Collected By</th><th>Status</th></tr></thead><tbody>' +
+      bundle.matchFee.transactions.map(function (t) {
+        return '<tr><td>' + t.matchNumber + '</td><td>' + t.matchDate + '</td><td>' + t.payingTeam + '</td><td>' + t.opponent + '</td><td>' + t.amount + '</td><td>' + t.receiptNumber + '</td><td>' + t.paymentMethod + '</td><td>' + t.paidAt + '</td><td>' + t.collectedBy + '</td><td>' + t.status + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
   // 'final'
   if (bundle.collegeWiseFinalStatement.length === 0) return '<p>No teams have been finalized yet.</p>';
   return '<table><thead><tr><th>Reg No</th><th>College</th><th>Gross</th><th>Food Refund</th><th>Net</th><th>Security Collected</th><th>Security Refunded</th><th>Adjustments</th><th>Final Balance</th><th>Documents</th></tr></thead><tbody>' +
@@ -77,7 +87,7 @@ function renderReportsScreen(root, user, bundle) {
   const tabs = [
     { key: 'financial', label: 'Financial' }, { key: 'food', label: 'Food' },
     { key: 'accommodation', label: 'Accommodation' }, { key: 'departure', label: 'Departure' },
-    { key: 'final', label: 'Final Statement' }
+    { key: 'final', label: 'Final Statement' }, { key: 'matchFee', label: 'Match Fee' }
   ];
   let activeTab = 'financial';
   render();
