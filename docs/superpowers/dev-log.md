@@ -1062,3 +1062,48 @@ Seventh sub-project, two live corrections from the human partner:
 - Deployed to production Apps Script @147 (@145 tests-only RED, @146 implementation, @147
   fixed the 4 existing tests the auto-calc/authority change broke). Service worker bumped
   to v31.
+
+## 2026-08-21 — Group H: Dari auto-calculation, corrected twice more
+
+Same-day follow-up to Group G's Dari auto-calc, corrected live by the human partner in two
+rounds after seeing the real numbers:
+
+1. **"No. of days" is nights stayed, not inclusive calendar days.** The first cut computed
+   `TournamentEndDate − TournamentStartDate + 1` (21–25 Sep = 5). Corrected: Dari/bedding is
+   charged per night, so it should be non-inclusive (21–25 Sep = 4 nights). Caught immediately
+   via a live test run before this even reached the human partner's own review.
+2. **"No. of days" is THIS TEAM's actual stay, not the tournament's fixed dates at all** — the
+   bigger correction. The human partner's own example made it unambiguous: "if a team
+   registers on 21/09/2026 and loses on 23/09/2026 then 2 nights, and if team has 14 members
+   then 2800.00" (confirms `RateDari(100) × 14 × 2 = 2800`, live-setting-consistent). A team
+   that leaves early after a loss owes Dari for the nights it actually stayed, regardless of
+   how long the tournament itself runs — `TournamentStartDate`/`EndDate` never belonged in this
+   formula at all.
+   - `_tournamentDurationDays_()` replaced with `_teamStayNights_(team, relievingDateOverride)`:
+     `TEAMS.RegistrationDateTime` (Asia/Kolkata calendar date) to the relieving date, not
+     inclusive. `relievingDateOverride` is the real operator-entered date at finalize time;
+     omitted for the live pre-finalize preview, which estimates using today's date instead (the
+     finalize form's own Relieving Date field also defaults to today, so this matches in the
+     common same-day case). `_computeSettlementPreview_` gained the same optional parameter,
+     threaded through from `finalizeDepartureAndGenerateDocuments_`'s already-existing
+     `relievingDate` argument.
+   - Confirmed with the human partner: this is the exact same `relievingDate` value printed as
+     the "Date" on the Relieving Order itself (`_buildRelievingLayout_`) — the date on that
+     document and the date driving the Dari-nights count can never disagree, they're the same
+     variable.
+- **Testing**: TDD both rounds, watched fail live before each fix (test-only deploy first to
+  confirm RED against the still-live-wrong implementation, then the implementation deploy to
+  go GREEN) — `departure_settlementPreview_dariAlwaysAutoCalculated` rewritten to the
+  human partner's own 14-members/2-nights example (matches their 2800 figure against live
+  `RateDari` exactly) plus a same-day 0-nights case for the live-preview estimate path;
+  `finalDocuments_receiptExcludesSecurityFromContent` updated to a deterministic
+  registration+3-days relieving date instead of a hardcoded past date (which would have
+  produced a negative/clamped-to-0 night count once nights became registration-relative).
+  Both confirmed RED for the right reason, then GREEN. Regression-checked
+  `departure_finalizeGeneratesDocumentsAndReliefsTeam`, `e2e_fullTeamLifecycle` (6 real PDFs),
+  and `departure_fullRefundFlow` (one transient failure the first time, caused by running it
+  concurrently against the same live Sheet while the e2e test was still executing in the
+  background — no isolation/mocking in this project by design; passed cleanly on its own on
+  retry, not a real regression).
+- Deployed to production Apps Script @150 (@149 tests-only RED, @150 implementation). No
+  frontend changes this round.

@@ -1280,32 +1280,40 @@ function test_mess_getFoodRefundOverview_roleGateAndContent() {
   }
 }
 
-// Regression test for a live correction (2026-08-20): Dari Charges must always be included in
-// the settlement/Final Receipt regardless of whether they were ticked at registration --
-// auto-calculated as rate x team members x tournament days, never the possibly-zero
-// CHARGES.DariCharges recorded at registration time. Reads live TournamentStartDate/EndDate
-// and RateDari rather than hardcoding an expected number, so this test stays correct
-// regardless of what those settings actually hold (this project's established convention --
-// see test_registration_calculateCharges_correctAndIdempotentGuard).
+// Regression test for a live correction (2026-08-20, refined 2026-08-21): Dari Charges must
+// always be included in the settlement/Final Receipt regardless of whether they were ticked
+// at registration -- auto-calculated as rate x team members x nights THIS TEAM actually
+// stayed. "Nights" is registration date to relieving date (NOT the tournament's own fixed
+// dates -- a team that registers 21 Sep and is relieved 23 Sep after losing owes Dari for 2
+// nights, whether or not the tournament itself runs longer; confirmed with the human partner
+// 2026-08-21, who caught that the first cut used the tournament's own Start/End Date settings
+// instead). Also not inclusive-of-both-ends: 21 to 23 is 2 nights, not 3.
 function test_departure_settlementPreview_dariAlwaysAutoCalculated() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   let createdTeamId = null;
   try {
-    const team = registerTeam_(regSession, 'Dari Auto-Calc Test College', 'District', 7, [{ name: 'Coach', isPrimary: true }]);
+    const team = registerTeam_(regSession, 'Dari Auto-Calc Test College', 'District', 14, [{ name: 'Coach', isPrimary: true }]);
     createdTeamId = team.teamId;
     // includeDari=false -- deliberately "unchecked" at registration, as a real operator might.
     calculateCharges_(regSession, createdTeamId, false, false);
-
-    const startDate = getSetting_('TournamentStartDate', '');
-    const endDate = getSetting_('TournamentEndDate', '');
-    const expectedDays = Math.round((new Date(endDate + 'T00:00:00Z') - new Date(startDate + 'T00:00:00Z')) / 86400000) + 1;
     const rateDari = Number(getSetting_('RateDari', '0'));
 
     const charges = findRowsByField_('CHARGES', 'TeamId', createdTeamId)[0];
     assertEqual_(Number(charges.DariCharges), 0, 'sanity check: registration-time Dari should be 0 since it was unticked');
 
-    const preview = getDepartureOverview_(regSession, createdTeamId).settlementPreview;
-    assertEqual_(preview.grossDariCharges, rateDari * 7 * expectedDays, 'settlement preview must auto-calculate Dari as rate x team members x tournament days, ignoring the unticked registration-time value');
+    // Live pre-finalize preview (no relievingDate chosen yet) estimates using today's date --
+    // registration also happened "today" (registerTeam_ above), so this should land on 0
+    // nights, not the tournament's span.
+    const previewBeforeDate = getDepartureOverview_(regSession, createdTeamId).settlementPreview;
+    assertEqual_(previewBeforeDate.grossDariCharges, 0, 'live preview before a relieving date is chosen should estimate 0 nights (registered today, no departure date yet)');
+
+    // Once a real relieving date is known (2 days after registration, mirroring the human
+    // partner's own example: registers 21 Sep, relieved 23 Sep -> 2 nights), the settlement
+    // must use THAT gap, not the tournament's own Start/End Date settings.
+    const todayKolkata = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+    const relievingDate = Utilities.formatDate(new Date(Date.parse(todayKolkata + 'T00:00:00Z') + 2 * 86400000), 'Asia/Kolkata', 'yyyy-MM-dd');
+    const previewWithDate = _computeSettlementPreview_(createdTeamId, relievingDate);
+    assertEqual_(previewWithDate.grossDariCharges, rateDari * 14 * 2, 'settlement must auto-calculate Dari as rate x team members x nights actually stayed (registration date to relieving date), ignoring the unticked registration-time value');
   } finally {
     if (createdTeamId) {
       findRowsByField_('CHARGES', 'TeamId', createdTeamId).forEach(function (c) { deleteRowById_('CHARGES', 'ChargeId', c.ChargeId); });
@@ -1513,16 +1521,22 @@ function test_finalDocuments_receiptExcludesSecurityFromContent() {
     });
     recordSecurityRefund_(regSession, createdTeamId, 500);
 
-    // grossDari = 10 (rate) x 3 (team members) x tournament days (live setting, read the same
-    // way _computeSettlementPreview_ computes it — see test_departure_settlementPreview_
-    // dariAlwaysAutoCalculated for the from-scratch version of this formula).
-    // grossCharges = 300 (meal) + grossDari; netCharges = grossCharges - 40 (food refund).
-    // FinalBalance = 40 (food) + 500 (security) - 0 (adjustments) = 540 regardless -- a
-    // materially different number that must NOT be what the receipt shows or spells out.
-    const expectedGrossDari = 10 * 3 * _tournamentDurationDays_();
+    // Nights = registration date ("today", stamped by _makeMessTestFixture_'s registerTeam_
+    // call above) to relievingDate below — 3 days out, chosen so it's always after
+    // registration regardless of what day this test actually runs (correction 2026-08-21 —
+    // see test_departure_settlementPreview_dariAlwaysAutoCalculated for the from-scratch
+    // version of this formula).
+    const todayKolkata = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+    const relievingDate = Utilities.formatDate(new Date(Date.parse(todayKolkata + 'T00:00:00Z') + 3 * 86400000), 'Asia/Kolkata', 'yyyy-MM-dd');
+
+    // grossDari = 10 (rate) x 3 (team members) x 3 (nights); grossCharges = 300 (meal) +
+    // grossDari; netCharges = grossCharges - 40 (food refund). FinalBalance = 40 (food) + 500
+    // (security) - 0 (adjustments) = 540 regardless -- a materially different number that must
+    // NOT be what the receipt shows or spells out.
+    const expectedGrossDari = 10 * 3 * 3;
     const expectedNetCharges = 300 + expectedGrossDari - 40;
 
-    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', '2026-08-20', ['not-a-real-inbox@example.invalid']);
+    const finalized = finalizeDepartureAndGenerateDocuments_(regSession, createdTeamId, 0, 'FN', relievingDate, ['not-a-real-inbox@example.invalid']);
     trashFileIds.push(finalized.receiptPdfFileId, finalized.relievingPdfFileId);
 
     const settlement = findRowsByField_('SETTLEMENTS', 'TeamId', createdTeamId)[0];

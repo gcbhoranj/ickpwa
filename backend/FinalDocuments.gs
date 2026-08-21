@@ -295,7 +295,7 @@ function finalizeDepartureAndGenerateDocuments_(actorSession, teamId, otherAdjus
     const authoritativeExisting = existingFinalResult();
     if (authoritativeExisting) return authoritativeExisting;
 
-    const preview = _computeSettlementPreview_(teamId);
+    const preview = _computeSettlementPreview_(teamId, relievingDate);
     const adjustments = Number(otherAdjustments) || 0;
     const finalBalance = preview.foodRefund + preview.securityRefunded - adjustments;
 

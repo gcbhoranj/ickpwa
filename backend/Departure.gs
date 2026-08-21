@@ -137,36 +137,41 @@ function getFoodRefundOverview_(actorSession, teamId) {
   };
 }
 
-// Whole tournament duration in calendar days, inclusive of both start and end dates (e.g. the
-// README's own "21–25 Sep 2026" reads as a 5-day event). Used to auto-calculate Dari Charges
-// for the final settlement — see _computeSettlementPreview_. Returns 0 if either date isn't
-// set yet (defensive only; both are seeded at setup and Admin-editable, never expected blank
-// live).
-function _tournamentDurationDays_() {
-  const start = getSetting_('TournamentStartDate', '');
-  const end = getSetting_('TournamentEndDate', '');
-  if (!start || !end) return 0;
-  const days = Math.round((new Date(end + 'T00:00:00Z') - new Date(start + 'T00:00:00Z')) / 86400000) + 1;
-  return days > 0 ? days : 0;
+// Nights THIS TEAM actually stayed — registration date to relieving date, not the tournament's
+// fixed dates (correction 2026-08-21: a team that registers 21 Sep and is relieved 23 Sep owes
+// Dari for 2 nights, regardless of the tournament's own 21-25 Sep span, whether it stays the
+// full event or leaves early after a loss). `relievingDateOverride` is the operator-entered
+// 'yyyy-MM-dd' from the finalize form when it's known (finalizeDepartureAndGenerateDocuments_);
+// omitted for the live pre-finalize preview (getDepartureOverview_), which estimates using
+// today's date instead — the finalize form's own Relieving Date field also defaults to today,
+// so this matches in the common same-day case and only goes stale if the operator picks a
+// different date, same as every other "hint" this screen already shows.
+function _teamStayNights_(team, relievingDateOverride) {
+  const regDateStr = Utilities.formatDate(new Date(team.values.RegistrationDateTime), 'Asia/Kolkata', 'yyyy-MM-dd');
+  const relieveDateStr = relievingDateOverride || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  const nights = Math.round((new Date(relieveDateStr + 'T00:00:00Z') - new Date(regDateStr + 'T00:00:00Z')) / 86400000);
+  return nights > 0 ? nights : 0;
 }
 
-// Shared by getDepartureOverview_ (live preview, no persistence) and
-// finalizeDepartureAndGenerateDocuments_ (FinalDocuments.gs, same math, persisted) — kept in
-// one place so the preview the operator sees can never drift from what finalize actually
-// computes.
-function _computeSettlementPreview_(teamId) {
+// Shared by getDepartureOverview_ (live preview, no persistence, no relievingDate yet) and
+// finalizeDepartureAndGenerateDocuments_ (FinalDocuments.gs, same math, persisted, passes the
+// real operator-entered relievingDate) — kept in one place so the preview the operator sees
+// can never drift from what finalize actually computes.
+function _computeSettlementPreview_(teamId, relievingDateOverride) {
   const charges = findRowsByField_('CHARGES', 'TeamId', teamId)[0] || null;
   const team = findRowById_('TEAMS', 'TeamId', teamId);
   const packages = findRowsByField_('FOOD_PACKAGES', 'TeamId', teamId);
   const grossMealCharges = packages.reduce(function (sum, p) { return sum + Number(p.Amount); }, 0);
   // Dari Charges are always included in the final settlement regardless of whether they were
   // ticked at registration (correction 2026-08-20) — auto-calculated as rate x team members x
-  // tournament days, using the rate snapshotted at registration (rate-locking, spec §19) if
-  // this team has a CHARGES row, else the live RateDari setting as a fallback for a team whose
-  // charges haven't been calculated yet.
+  // nights THIS TEAM stayed (correction 2026-08-21 — see _teamStayNights_), using the rate
+  // snapshotted at registration (rate-locking, spec §19) if this team has a CHARGES row, else
+  // the live RateDari setting as a fallback for a team whose charges haven't been calculated
+  // yet.
   const rateDari = charges ? Number(charges.RateDariSnapshot) : Number(getSetting_('RateDari', '0'));
   const numberOfTeamMembers = team ? Number(team.values.NumberOfTeamMembers) : 0;
-  const grossDariCharges = rateDari * numberOfTeamMembers * _tournamentDurationDays_();
+  const nights = team ? _teamStayNights_(team, relievingDateOverride) : 0;
+  const grossDariCharges = rateDari * numberOfTeamMembers * nights;
   const foodRefund = findRowsByField_('REFUNDS', 'TeamId', teamId).reduce(function (sum, r) { return sum + Number(r.RefundAmount); }, 0);
   const securityCollected = charges ? Number(charges.SecurityCharges) : 0;
   const securityRefundRow = findRowsByField_('SECURITY_REFUNDS', 'TeamId', teamId)[0];
