@@ -185,6 +185,18 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return updateMealTimings_(session, payload);
   },
+  'matchfee.match.create': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createMatch_(session, payload.team1Id, payload.team2Id, payload.matchDate);
+  },
+  'matchfee.match.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { matches: listMatches_(session) };
+  },
+  'matchfee.match.detail': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getMatchDetail_(session, payload.matchId);
+  },
   'registration.team.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);

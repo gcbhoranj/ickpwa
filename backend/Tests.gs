@@ -405,6 +405,61 @@ function test_settings_mealTimingsValidationAndUpdate() {
   assertEqual_(updated.graceMinutes, '10', 'grace minutes did not round-trip');
 }
 
+function test_matchfee_createMatch_validatesTeamsAndListsDetail() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const messSession = { userId: 'USR-0001', role: ROLES.MESS, sessionId: 'y' };
+  let team1Id = null, team2Id = null, matchId = null, repeatMatchId = null;
+  try {
+    team1Id = registerTeam_(regSession, 'Match Fee College A', 'District', 12, [{ name: 'Coach A', isPrimary: true }]).teamId;
+    team2Id = registerTeam_(regSession, 'Match Fee College B', 'District', 12, [{ name: 'Coach B', isPrimary: true }]).teamId;
+
+    let threwSameTeam = false;
+    try {
+      createMatch_(regSession, team1Id, team1Id, '2026-09-22');
+    } catch (err) { threwSameTeam = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for same team on both sides'); }
+    assertTrue_(threwSameTeam, 'createMatch_ did not reject Team 1 === Team 2');
+
+    let threwUnknownTeam = false;
+    try {
+      createMatch_(regSession, team1Id, 'TEAM-DOES-NOT-EXIST', '2026-09-22');
+    } catch (err) { threwUnknownTeam = true; assertEqual_(err.code, 'NOT_FOUND', 'wrong code for an unknown team'); }
+    assertTrue_(threwUnknownTeam, 'createMatch_ did not reject an unregistered team id');
+
+    let threwForbidden = false;
+    try {
+      createMatch_(messSession, team1Id, team2Id, '2026-09-22');
+    } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for a Mess Committee caller'); }
+    assertTrue_(threwForbidden, 'createMatch_ did not reject a Mess Committee caller');
+
+    const created = createMatch_(regSession, team1Id, team2Id, '2026-09-22');
+    matchId = created.matchId;
+    assertTrue_(/^M-\d{3}$/.test(created.matchNumber), 'unexpected match number format: ' + created.matchNumber);
+
+    const detail = getMatchDetail_(regSession, matchId);
+    assertEqual_(detail.team1.collegeName, 'Match Fee College A', 'wrong Team 1 college name in detail');
+    assertEqual_(detail.team2.collegeName, 'Match Fee College B', 'wrong Team 2 college name in detail');
+    assertEqual_(detail.team1Status.status, 'PENDING', 'a brand-new match should start both teams PENDING');
+    assertEqual_(detail.team2Status.status, 'PENDING', 'a brand-new match should start both teams PENDING');
+    assertTrue_(detail.matchFeeRate >= 0, 'matchFeeRate should be a live-read non-negative number');
+
+    const list = listMatches_(regSession);
+    assertTrue_(list.some(function (m) { return m.matchId === matchId; }), 'listMatches_ should include the newly created match');
+
+    // Legitimate repeat fixture — same two teams, a different date — must be allowed (spec §3).
+    const repeat = createMatch_(regSession, team1Id, team2Id, '2026-09-24');
+    repeatMatchId = repeat.matchId;
+    assertTrue_(repeatMatchId !== matchId, 'a legitimate repeat fixture should create a distinct match');
+  } finally {
+    if (matchId) deleteRowById_('MATCHES', 'MatchId', matchId);
+    if (repeatMatchId) deleteRowById_('MATCHES', 'MatchId', repeatMatchId);
+    [team1Id, team2Id].forEach(function (id) {
+      if (!id) return;
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', id).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', id);
+    });
+  }
+}
+
 function test_registration_registerTeam_validationAndCreation() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   let createdTeamId = null;
@@ -2610,6 +2665,7 @@ const TEST_CASES = [
   { name: 'settings_updateRatesAndLock', fn: test_settings_updateRatesAndLock },
   { name: 'settings_uploadSignature_validatesAndReplacesOldFile', fn: test_settings_uploadSignature_validatesAndReplacesOldFile },
   { name: 'settings_mealTimingsValidationAndUpdate', fn: test_settings_mealTimingsValidationAndUpdate },
+  { name: 'matchfee_createMatch_validatesTeamsAndListsDetail', fn: test_matchfee_createMatch_validatesTeamsAndListsDetail },
   { name: 'registration_registerTeam_validationAndCreation', fn: test_registration_registerTeam_validationAndCreation },
   { name: 'registration_calculateCharges_correctAndIdempotentGuard', fn: test_registration_calculateCharges_correctAndIdempotentGuard },
   { name: 'registration_calculateCharges_uncheckedItemsAreZeroAndOmitted', fn: test_registration_calculateCharges_uncheckedItemsAreZeroAndOmitted },
