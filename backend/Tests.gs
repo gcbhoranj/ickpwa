@@ -1463,6 +1463,213 @@ function test_finalDocuments_numberToWordsIndian() {
   assertEqual_(_numberToWordsIndian_(10000000), 'One Crore Rupees Only', 'flat crore wrong');
 }
 
+function test_matchfee_collectMatchFee_fullPaymentAndProtectionFlow() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'a' };
+  let team1Id = null, team2Id = null, matchId = null;
+  const trashFileIds = [];
+  // Capture the REAL current rates/lock so this test can restore them exactly, rather than
+  // assuming unlocked or hardcoding rate values — the live production lock is real
+  // Admin-configured state (matches the fix applied to test_settings_updateRatesAndLock).
+  const before = getRegistrationInfo_(adminSession);
+  const originalRates = {
+    breakfast: before.rateBreakfast, lunch: before.rateLunch, dinner: before.rateDinner,
+    dari: before.rateDari, security: before.securityAmount, matchFee: before.matchFeeRate
+  };
+  const originalLocked = before.financialSettingsLocked === 'true';
+  try {
+    if (originalLocked) setFinancialLock_(adminSession, false);
+    team1Id = registerTeam_(regSession, 'Match Fee Pay College A', 'District', 12, [{ name: 'Coach A', isPrimary: true, email: 'not-a-real-inbox@example.invalid' }]).teamId;
+    team2Id = registerTeam_(regSession, 'Match Fee Pay College B', 'District', 12, [{ name: 'Coach B', isPrimary: true, email: 'not-a-real-inbox@example.invalid' }]).teamId;
+    const match = createMatch_(regSession, team1Id, team2Id, '2026-09-22');
+    matchId = match.matchId;
+
+    updateRates_(adminSession, {
+      breakfast: originalRates.breakfast, lunch: originalRates.lunch, dinner: originalRates.dinner,
+      dari: originalRates.dari, security: originalRates.security, matchFee: 500
+    });
+
+    // Team 2 pays first — either order must work (spec §1).
+    const team2Payment = collectMatchFee_(regSession, matchId, team2Id, 'Cash', [], null);
+    trashFileIds.push(team2Payment.receiptPdfFileId);
+    assertEqual_(team2Payment.amount, 500, 'Team 2 payment amount should equal the current Match Fee rate');
+    assertEqual_(team2Payment.rateSnapshot, 500, 'Team 2 payment should snapshot the rate at payment time');
+    assertTrue_(/^GCB\/HPUICK-2026\/MF\/\d{5}$/.test(team2Payment.receiptNumber), 'unexpected receipt number format: ' + team2Payment.receiptNumber);
+    assertTrue_(['SENT', 'FAILED', 'NOT_SENT'].indexOf(team2Payment.emailStatus) !== -1, 'unexpected emailStatus: ' + team2Payment.emailStatus);
+
+    let detail = getMatchDetail_(regSession, matchId);
+    assertEqual_(detail.team1Status.status, 'PENDING', 'Team 1 should still be PENDING while only Team 2 has paid');
+    assertEqual_(detail.team2Status.status, 'PAID', 'Team 2 should now be PAID');
+    assertEqual_(detail.team2Status.receiptNumber, team2Payment.receiptNumber, 'match detail should reflect Team 2 receipt number');
+
+    // Duplicate payment attempt for the SAME team — rejected server-side, carries the existing receipt number.
+    let threwAlreadyPaid = false;
+    try {
+      collectMatchFee_(regSession, matchId, team2Id, 'Cash', [], null);
+    } catch (err) {
+      threwAlreadyPaid = true;
+      assertEqual_(err.code, 'ALREADY_PAID', 'wrong error code for a duplicate Match Fee payment');
+      assertEqual_(err.receiptNumber, team2Payment.receiptNumber, 'ALREADY_PAID error should carry the existing receipt number');
+    }
+    assertTrue_(threwAlreadyPaid, 'collectMatchFee_ did not reject a second payment for the same (match, team)');
+    assertEqual_(findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).filter(function (t) { return t.TeamId === team2Id; }).length, 1, 'a duplicate attempt must not create a second transaction row');
+
+    // ClientRequestId replay — same request id twice must return the SAME transaction, no new receipt number.
+    const team1First = collectMatchFee_(regSession, matchId, team1Id, 'Online', [], 'mf-replay-1');
+    trashFileIds.push(team1First.receiptPdfFileId);
+    const team1Replay = collectMatchFee_(regSession, matchId, team1Id, 'Online', [], 'mf-replay-1');
+    assertEqual_(team1Replay.transactionId, team1First.transactionId, 'a ClientRequestId replay must return the original transaction');
+    assertEqual_(team1Replay.receiptNumber, team1First.receiptNumber, 'a ClientRequestId replay must not allocate a new receipt number');
+    assertTrue_(team1Replay.replay, 'a ClientRequestId replay result should be flagged as a replay');
+    assertEqual_(findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).filter(function (t) { return t.TeamId === team1Id; }).length, 1, 'a replayed request must not create a second transaction row');
+
+    detail = getMatchDetail_(regSession, matchId);
+    assertEqual_(detail.team1Status.status, 'PAID', 'Team 1 should now be PAID too');
+    assertTrue_(detail.team1Status.receiptNumber !== detail.team2Status.receiptNumber, 'the two teams must have distinct receipt numbers');
+
+    // Rate change AFTER payment must never alter an already-created transaction (spec §3/Q-R).
+    updateRates_(adminSession, {
+      breakfast: originalRates.breakfast, lunch: originalRates.lunch, dinner: originalRates.dinner,
+      dari: originalRates.dari, security: originalRates.security, matchFee: 700
+    });
+    const stillOldRateTx = findRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', team2Payment.transactionId).values;
+    assertEqual_(Number(stillOldRateTx.RateSnapshot), 500, 'an existing transaction must keep its original rate snapshot after Admin changes the rate');
+    assertEqual_(Number(stillOldRateTx.Amount), 500, 'an existing transaction must keep its original amount after Admin changes the rate');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    updateRates_(adminSession, originalRates);
+    if (originalLocked) setFinancialLock_(adminSession, true); // restore the REAL original lock state
+    if (matchId) {
+      findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).forEach(function (t) { deleteRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', t.TransactionId); });
+      deleteRowById_('MATCHES', 'MatchId', matchId);
+    }
+    [team1Id, team2Id].forEach(function (id) {
+      if (!id) return;
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', id).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', id);
+    });
+  }
+}
+
+// Regression test for spec §9: Match Fee must never enter the Final Receipt/settlement
+// calculation. Compares _computeSettlementPreview_'s output for the same team before and
+// after a Match Fee transaction exists — must be byte-for-byte identical.
+function test_matchfee_doesNotAffectFinalReceiptSettlement() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let fixture = null;
+  let createdTeamId = null;
+  let opponentTeamId = null;
+  let matchId = null;
+  let transactionId = null;
+  const trashFileIds = [];
+  try {
+    fixture = _makeMessTestFixture_('2026-08-19', '2026-08-20', 3);
+    createdTeamId = fixture.teamId;
+    opponentTeamId = registerTeam_(regSession, 'Match Fee Isolation Opponent', 'District', 5, [{ name: 'Coach', isPrimary: true }]).teamId;
+
+    const beforePreview = _computeSettlementPreview_(createdTeamId, '2026-08-20');
+
+    const match = createMatch_(regSession, createdTeamId, opponentTeamId, '2026-08-19');
+    matchId = match.matchId;
+    const paid = collectMatchFee_(regSession, matchId, createdTeamId, 'Cash', [], null);
+    transactionId = paid.transactionId;
+    trashFileIds.push(paid.receiptPdfFileId);
+
+    const afterPreview = _computeSettlementPreview_(createdTeamId, '2026-08-20');
+    assertEqual_(afterPreview.grossMealCharges, beforePreview.grossMealCharges, 'Match Fee must not affect grossMealCharges');
+    assertEqual_(afterPreview.grossDariCharges, beforePreview.grossDariCharges, 'Match Fee must not affect grossDariCharges');
+    assertEqual_(afterPreview.grossCharges, beforePreview.grossCharges, 'Match Fee must not affect grossCharges');
+    assertEqual_(afterPreview.netCharges, beforePreview.netCharges, 'Match Fee must not affect netCharges');
+    assertEqual_(afterPreview.securityCollected, beforePreview.securityCollected, 'Match Fee must not affect securityCollected');
+    assertEqual_(afterPreview.securityRefunded, beforePreview.securityRefunded, 'Match Fee must not affect securityRefunded');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (transactionId) deleteRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', transactionId);
+    if (matchId) deleteRowById_('MATCHES', 'MatchId', matchId);
+    if (opponentTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', opponentTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', opponentTeamId);
+    }
+    if (fixture) _cleanupMessTestFixture_(fixture);
+  }
+}
+
+function test_matchfee_resendAndVoidThenRecollect() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'a' };
+  let team1Id = null, team2Id = null, matchId = null;
+  const trashFileIds = [];
+  try {
+    team1Id = registerTeam_(regSession, 'Match Fee Void College A', 'District', 6, [{ name: 'Coach A', isPrimary: true }]).teamId;
+    team2Id = registerTeam_(regSession, 'Match Fee Void College B', 'District', 6, [{ name: 'Coach B', isPrimary: true }]).teamId;
+    const match = createMatch_(regSession, team1Id, team2Id, '2026-09-23');
+    matchId = match.matchId;
+
+    const paid = collectMatchFee_(regSession, matchId, team1Id, 'Cash', [], null);
+    trashFileIds.push(paid.receiptPdfFileId);
+
+    // Resend reuses the SAME receipt — never a new number, never a new transaction.
+    const resent = resendMatchFeeReceipt_(regSession, paid.transactionId, []);
+    assertEqual_(resent.receiptNumber, paid.receiptNumber, 'resend must reuse the same receipt number');
+    assertEqual_(resent.receiptPdfFileId, paid.receiptPdfFileId, 'resend must reuse the same receipt PDF');
+    assertEqual_(findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).filter(function (t) { return t.TeamId === team1Id; }).length, 1, 'resend must not create a second transaction');
+
+    // Void requires ADMIN and a reason.
+    let threwForbidden = false;
+    try {
+      voidMatchFeeTransaction_(regSession, paid.transactionId, 'wrong role test');
+    } catch (err) { threwForbidden = true; assertEqual_(err.code, 'FORBIDDEN', 'wrong code for a Registration caller voiding'); }
+    assertTrue_(threwForbidden, 'voidMatchFeeTransaction_ did not reject a non-Admin caller');
+
+    let threwNoReason = false;
+    try {
+      voidMatchFeeTransaction_(adminSession, paid.transactionId, '');
+    } catch (err) { threwNoReason = true; assertEqual_(err.code, 'VALIDATION_ERROR', 'wrong code for a missing void reason'); }
+    assertTrue_(threwNoReason, 'voidMatchFeeTransaction_ did not require a reason');
+
+    const voided = voidMatchFeeTransaction_(adminSession, paid.transactionId, 'Collected in error — wrong team');
+    assertEqual_(voided.status, 'VOID', 'void should set Status to VOID');
+    assertEqual_(voided.receiptNumber, paid.receiptNumber, 'void must retain the original receipt number');
+
+    const voidedRow = findRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', paid.transactionId).values;
+    assertEqual_(voidedRow.VoidReason, 'Collected in error — wrong team', 'void reason not recorded');
+    assertEqual_(voidedRow.VoidedBy, adminSession.userId, 'voidedBy not recorded');
+    assertTrue_(!!voidedRow.VoidedAt, 'voidedAt not recorded');
+
+    let threwAlreadyVoid = false;
+    try {
+      voidMatchFeeTransaction_(adminSession, paid.transactionId, 'double void attempt');
+    } catch (err) { threwAlreadyVoid = true; assertEqual_(err.code, 'ALREADY_VOID', 'wrong code for double-void'); }
+    assertTrue_(threwAlreadyVoid, 'voidMatchFeeTransaction_ did not reject voiding an already-voided transaction');
+
+    // The team can now be re-collected — new transaction, new receipt number, old row stays VOID.
+    const recollected = collectMatchFee_(regSession, matchId, team1Id, 'Online', [], null);
+    trashFileIds.push(recollected.receiptPdfFileId);
+    assertTrue_(recollected.transactionId !== paid.transactionId, 're-collection after void must create a new transaction');
+    assertTrue_(recollected.receiptNumber !== paid.receiptNumber, 're-collection after void must allocate a new receipt number, never the voided one');
+
+    const allTxForTeam1 = findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).filter(function (t) { return t.TeamId === team1Id; });
+    assertEqual_(allTxForTeam1.length, 2, 'both the voided and the new transaction should remain in history');
+    assertEqual_(allTxForTeam1.filter(function (t) { return t.Status === 'VOID'; }).length, 1, 'exactly one of the two rows should be VOID');
+    assertEqual_(allTxForTeam1.filter(function (t) { return t.Status === 'ACTIVE'; }).length, 1, 'exactly one of the two rows should be ACTIVE');
+
+    const detail = getMatchDetail_(regSession, matchId);
+    assertEqual_(detail.team1Status.status, 'PAID', 'team1 should be PAID again via the new transaction');
+    assertEqual_(detail.team1Status.receiptNumber, recollected.receiptNumber, 'match detail should reflect the NEW receipt number, not the voided one');
+  } finally {
+    trashFileIds.forEach(function (id) { if (id) DriveApp.getFileById(id).setTrashed(true); });
+    if (matchId) {
+      findRowsByField_('MATCH_FEE_TRANSACTIONS', 'MatchId', matchId).forEach(function (t) { deleteRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', t.TransactionId); });
+      deleteRowById_('MATCHES', 'MatchId', matchId);
+    }
+    [team1Id, team2Id].forEach(function (id) {
+      if (!id) return;
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', id).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', id);
+    });
+  }
+}
+
 function test_departure_finalizeGeneratesDocumentsAndReliefsTeam() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const messSession = { userId: 'USR-0004', role: ROLES.MESS, sessionId: 'm' };
@@ -1791,6 +1998,59 @@ function test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly() {
       findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
       deleteRowById_('TEAMS', 'TeamId', createdTeamId);
     }
+  }
+}
+
+function test_reports_getAll_includesMatchFeeSeparately() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const adminSession = { userId: 'USR-0002', role: ROLES.ADMIN, sessionId: 'y' };
+  let team1Id = null, team2Id = null, matchId = null, transactionId = null;
+  try {
+    team1Id = registerTeam_(regSession, 'Match Fee Report College A', 'District', 5, [{ name: 'Coach', isPrimary: true }]).teamId;
+    team2Id = registerTeam_(regSession, 'Match Fee Report College B', 'District', 5, [{ name: 'Coach', isPrimary: true }]).teamId;
+    const match = createMatch_(regSession, team1Id, team2Id, '2026-09-22');
+    matchId = match.matchId;
+
+    // Direct fixture write, bypassing collectMatchFee_ — no real PDF/email needed to test
+    // report aggregation, matching this codebase's existing fixture convention
+    // (_makeMessTestFixture_ writes FOOD_PACKAGES directly for the same reason).
+    transactionId = nextId_('MFTX', 5);
+    const now = new Date().toISOString();
+    appendRow_('MATCH_FEE_TRANSACTIONS', {
+      TransactionId: transactionId, MatchId: matchId, TeamId: team1Id, OpponentTeamId: team2Id,
+      Amount: 500, RateSnapshot: 500, PaymentMethod: 'Cash', PaidAt: now, CollectedBy: regSession.userId,
+      ReceiptNumber: 'GCB/HPUICK-2026/MF/09999', ReceiptPdfFileId: 'test-fixture-no-real-pdf',
+      EmailStatus: 'SENT', Status: 'ACTIVE', VoidReason: '', VoidedBy: '', VoidedAt: '',
+      ClientRequestId: '', CreatedBy: regSession.userId, CreatedAt: now
+    });
+
+    const bundle = getReportsBundle_(adminSession);
+    assertTrue_(bundle.dashboard.hasOwnProperty('matchFeeCollected'), 'dashboard should expose matchFeeCollected');
+    assertTrue_(!!bundle.matchFee, 'reports bundle should include a matchFee section');
+
+    const txRow = bundle.matchFee.transactions.filter(function (t) { return t.transactionId === transactionId; })[0];
+    assertTrue_(!!txRow, 'matchFee.transactions should include the fixture transaction');
+    assertEqual_(txRow.payingTeam, 'Match Fee Report College A', 'wrong paying team name in matchFee report row');
+    assertEqual_(txRow.opponent, 'Match Fee Report College B', 'wrong opponent name in matchFee report row');
+    assertEqual_(txRow.matchNumber, match.matchNumber, 'wrong match number in matchFee report row');
+
+    assertTrue_(bundle.matchFee.summary.totalCollected >= 500, 'matchFee summary totalCollected should include the fixture amount');
+    assertTrue_(bundle.matchFee.summary.cashCollected >= 500, 'matchFee summary cashCollected should include the Cash fixture amount');
+
+    // Isolation (spec §9 applies to reporting too): this transaction must never appear as a
+    // Dari/food/security figure in the EXISTING financial report.
+    const financialRow = bundle.financial.filter(function (r) { return r.teamId === team1Id; })[0];
+    assertTrue_(!!financialRow, 'financial report should still include the team');
+    assertEqual_(financialRow.dariCharges, 0, 'Match Fee must never be counted as dariCharges in the financial report');
+    assertEqual_(financialRow.packageRevenue, 0, 'Match Fee must never be counted as packageRevenue in the financial report');
+  } finally {
+    if (transactionId) deleteRowById_('MATCH_FEE_TRANSACTIONS', 'TransactionId', transactionId);
+    if (matchId) deleteRowById_('MATCHES', 'MatchId', matchId);
+    [team1Id, team2Id].forEach(function (id) {
+      if (!id) return;
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', id).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', id);
+    });
   }
 }
 
@@ -2692,7 +2952,11 @@ const TEST_CASES = [
   { name: 'mess_getFoodRefundOverview_roleGateAndContent', fn: test_mess_getFoodRefundOverview_roleGateAndContent },
   { name: 'departure_settlementPreview_dariAlwaysAutoCalculated', fn: test_departure_settlementPreview_dariAlwaysAutoCalculated },
   { name: 'finalDocuments_numberToWordsIndian', fn: test_finalDocuments_numberToWordsIndian },
+  { name: 'matchfee_collectMatchFee_fullPaymentAndProtectionFlow', fn: test_matchfee_collectMatchFee_fullPaymentAndProtectionFlow, tier: 'pdf2' },
+  { name: 'matchfee_doesNotAffectFinalReceiptSettlement', fn: test_matchfee_doesNotAffectFinalReceiptSettlement, tier: 'pdf2' },
+  { name: 'matchfee_resendAndVoidThenRecollect', fn: test_matchfee_resendAndVoidThenRecollect, tier: 'pdf2' },
   { name: 'reports_getAll_adminOnlyAndAggregatesTeamCorrectly', fn: test_reports_getAll_adminOnlyAndAggregatesTeamCorrectly },
+  { name: 'reports_getAll_includesMatchFeeSeparately', fn: test_reports_getAll_includesMatchFeeSeparately },
   { name: 'reports_auditLog_scopesToOwnActionsForNonAdmin', fn: test_reports_auditLog_scopesToOwnActionsForNonAdmin },
   { name: 'settings_tournamentInfo_updateAndValidate', fn: test_settings_tournamentInfo_updateAndValidate },
   { name: 'settings_getPublicTournamentInfo_matchesAdminView', fn: test_settings_getPublicTournamentInfo_matchesAdminView },

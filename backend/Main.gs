@@ -197,6 +197,22 @@ const ACTIONS = {
     const session = requireSession_(sessionId);
     return getMatchDetail_(session, payload.matchId);
   },
+  'admin.bootstrap.createMatchFeeReceiptTemplate': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return createMatchFeeReceiptTemplate_(session, !!(payload && payload.force));
+  },
+  'matchfee.pay': function (payload, sessionId, requestId) {
+    const session = requireSession_(sessionId);
+    return collectMatchFee_(session, payload.matchId, payload.teamId, payload.mode, payload.recipientEmails, requestId);
+  },
+  'matchfee.receipt.resend': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return resendMatchFeeReceipt_(session, payload.transactionId, payload.recipientEmails);
+  },
+  'matchfee.transaction.void': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return voidMatchFeeTransaction_(session, payload.transactionId, payload.reason);
+  },
   'registration.team.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);

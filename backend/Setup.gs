@@ -134,7 +134,8 @@ function setupDriveFolders_() {
     'Accommodation/NOC Certificates': _ensureSubfolder_(_ensureSubfolder_(root, 'Accommodation'), 'NOC Certificates'),
     Templates: _ensureSubfolder_(root, 'Templates'),
     Assets: _ensureSubfolder_(root, 'Assets'),
-    Reports: _ensureSubfolder_(root, 'Reports')
+    Reports: _ensureSubfolder_(root, 'Reports'),
+    'Match Fee Receipts': _ensureSubfolder_(root, 'Match Fee Receipts')
   };
 
   setSetting_('DriveRootFolderId', root.getId(), 'setup');

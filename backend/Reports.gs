@@ -136,9 +136,54 @@ function getReportsBundle_(actorSession) {
       };
     });
 
+  // --- Match Fee (spec §20/§9 — a separate stream, never merged into financial/
+  // collegeWiseFinalStatement) ---
+  const matchFeeTransactions = rowsToObjects_('MATCH_FEE_TRANSACTIONS');
+  const matches = rowsToObjects_('MATCHES');
+  const matchesById = {};
+  matches.forEach(function (m) { matchesById[m.MatchId] = m; });
+  const teamsById = {};
+  teams.forEach(function (t) { teamsById[t.TeamId] = t; });
+
+  const activeMatchFeeTx = matchFeeTransactions.filter(function (t) { return t.Status === 'ACTIVE'; });
+  const matchFeeByMethod = { Cash: 0, Online: 0, Cheque: 0 };
+  activeMatchFeeTx.forEach(function (t) { matchFeeByMethod[t.PaymentMethod] = (matchFeeByMethod[t.PaymentMethod] || 0) + Number(t.Amount); });
+
+  let matchFeePendingCount = 0;
+  matches.forEach(function (m) {
+    [m.Team1Id, m.Team2Id].forEach(function (teamId) {
+      const paid = activeMatchFeeTx.some(function (t) { return t.MatchId === m.MatchId && t.TeamId === teamId; });
+      if (!paid) matchFeePendingCount++;
+    });
+  });
+
+  const matchFee = {
+    transactions: matchFeeTransactions.map(function (t) {
+      const m = matchesById[t.MatchId];
+      const payingTeam = teamsById[t.TeamId];
+      const opponentTeam = teamsById[t.OpponentTeamId];
+      return {
+        transactionId: t.TransactionId, matchId: t.MatchId, matchNumber: m ? m.MatchNumber : '',
+        matchDate: m ? m.MatchDate : '', payingTeam: payingTeam ? payingTeam.CollegeName : '',
+        opponent: opponentTeam ? opponentTeam.CollegeName : '', amount: Number(t.Amount),
+        receiptNumber: t.ReceiptNumber, paymentMethod: t.PaymentMethod, paidAt: t.PaidAt,
+        collectedBy: t.CollectedBy, status: t.Status, emailStatus: t.EmailStatus
+      };
+    }),
+    summary: {
+      totalCollected: sum(activeMatchFeeTx, 'Amount'), matchesCount: matches.length,
+      teamPaymentsCount: activeMatchFeeTx.length, pendingCount: matchFeePendingCount,
+      cashCollected: matchFeeByMethod.Cash, onlineCollected: matchFeeByMethod.Online, chequeCollected: matchFeeByMethod.Cheque
+    }
+  };
+  dashboard.matchFeeCollected = matchFee.summary.totalCollected;
+  dashboard.matchFeePending = matchFee.summary.pendingCount;
+  dashboard.matchFeeTeamPayments = matchFee.summary.teamPaymentsCount;
+  dashboard.matchFeeReceiptsGenerated = activeMatchFeeTx.filter(function (t) { return !!t.ReceiptPdfFileId; }).length;
+
   return {
     dashboard: dashboard, financial: financial, food: food, accommodation: accommodation,
-    departure: departure, collegeWiseFinalStatement: collegeWiseFinalStatement
+    departure: departure, collegeWiseFinalStatement: collegeWiseFinalStatement, matchFee: matchFee
   };
 }
 
