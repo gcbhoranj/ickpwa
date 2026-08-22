@@ -1228,3 +1228,79 @@ template before it's used for real).
 Deployed to production Apps Script @156 (@151-152 Task 1, @153 Task 2, @154 Task 3, @155
 Tasks 4-5, @156 Task 3 test lock-state fix). Frontend (`matchfee.js`, dashboard/settings/
 reports wiring, service worker v32) pushed to the `ickpwa` GitHub Pages repo.
+
+## 2026-08-22 — Pre-Registration: Google Form check-in flow
+
+Request: colleges should be able to pre-register their team (same fields as the registration
+wizard, plus "Mode of Travelling of Team" — Bus/hired vehicle/College vehicle) well before the
+tournament, via a Google Form, so on opening day the Registration Committee just picks the
+team from the pre-registration data, verifies/edits it, and proceeds straight to charges →
+payment → temporary receipt.
+
+Brainstormed as architectural (new subsystem + touches the registration wizard) — full
+design-in-chat, section by section, approved before implementation; the human partner then
+asked to skip the written spec/plan docs and build directly, so this entry is the only
+record of the design decisions.
+
+1. **Data model**: new `PRE_REGISTRATIONS` sheet, flattened (fixed slots for up to 3
+   incharges — Google Forms has no dynamic repeating group) rather than a normalized table.
+   `TravelMode` added as a new trailing column on `TEAMS` (same backward-compatible
+   schema-extension pattern as `ROOMS.RoomType`).
+2. **Form generation**: `admin.bootstrap.setupPreRegistrationForm` builds the Form via
+   `FormApp` (College/District/Members/3×Incharge slots/Mode of Travelling dropdown),
+   installs an `onFormSubmit` trigger, saves the form URL to Settings. Idempotent without
+   `force`; `force` recreates the form and re-points the trigger. Deliberately leaves "allow
+   response edits" off — Google's own edit-response link does not re-fire `onFormSubmit`,
+   so a resubmission (not an edit) is the supported correction path.
+3. **Ingestion**: upsert-by-college — a new submission overwrites the existing `PENDING` row
+   for that college; if the only match is already `CONVERTED`, it's left alone and the
+   submission becomes a fresh `PENDING` row instead (so a stray resubmission after check-in
+   can never un-convert a team). A `PreRegistrationLastSyncedAt` watermark (advanced after
+   every successful upsert, from either path) means the "Sync Now" manual-pull fallback never
+   re-walks history already folded in by the trigger.
+4. **registerTeam_**: gained optional `travelMode`/`preRegId` params (backward-compatible,
+   same convention as `calculateCharges_`'s `includeDari`/`includeSecurity`). `preRegId` is
+   validated as still `PENDING` before the team is created, then the pre-registration is
+   marked `CONVERTED` with a link to the new team — guards a double-click or two operators
+   racing the same entry.
+5. **Frontend**: new `preregistration.js` (Pre-Registrations list + Sync Now), the existing
+   register wizard now takes an optional pre-fill (from `registration.preReg.detail`, fully
+   editable) and a new Travel Mode field for every team regardless of source, Settings gets a
+   generate/regenerate section for the form link, Team Detail shows travel mode. Service
+   worker bumped to v33.
+6. **One-time authorization**: Forms/`ScriptApp` trigger installation are new scopes for this
+   project — added `authorizeFormsManually` (same run-once-from-the-editor pattern as
+   `authorizeDriveManually`/`authorizeGmailManually`). Not yet run — the live Admin still
+   needs to do this once, interactively, before `setupPreRegistrationForm_` will work; this
+   session had no browser access to click through the consent dialog itself.
+
+**Testing**: 4 new tests (`preRegistration_upsertRow_autoReplacesPendingButPreservesConverted`,
+`preRegistration_getPreRegistrationDetail_reshapesInchargesAndGuardsConverted`,
+`registration_registerTeam_fromPreRegistration_convertsAndCopiesTravelMode`,
+`preRegistration_listPendingPreRegistrations_excludesConverted`) — none touch `FormApp`
+directly (matching the existing convention that Forms/Drive/Slides-touching setup functions
+aren't in the automated suite), so all 4 ran and passed live without needing the one-time
+Forms authorization. Also spot-checked 8 adjacent pre-existing tests for regressions from the
+`registerTeam_` signature change and the `TEAMS` schema addition — all green
+(`sheetHelpers_appendFindUpdateDelete`, `idGenerator_sequentialAndUnique`,
+`registration_registerTeam_needsAccommodationFlag`,
+`registration_recordPayment_createsTwoRowsAndGuards`, `registration_listAndDetailTeams`,
+`registration_getTeamDetail_includesRelievingOrder`,
+`registration_getTeamDetail_includesNocStatus`,
+`registration_getTeamDetail_redactsFinancialsForMess`,
+`registration_getTeamDetail_redactsFinancialsForAccommodation`,
+`reports_getAll_adminOnlyAndAggregatesTeamCorrectly`,
+`reports_getAll_includesMatchFeeSeparately`).
+
+Deploy sequence: `clasp push`, then a throwaway test deployment (`@157`) to validate against
+without touching the live URL, `admin.bootstrap.setupSchema` run live (ADMIN session
+provided by the human partner) to provision `PRE_REGISTRATIONS` and the `TEAMS.TravelMode`
+header — confirmed additive-only, no other sheet touched — then all tests above run and
+passed against `@157`, then promoted to the production deployment
+(`AKfycbySk37loMP...`, now `@158`) and the throwaway deployment deleted. Frontend pushed to
+the `ickpwa` GitHub Pages repo via `git subtree push --prefix=frontend frontend-origin main`.
+
+**Still outstanding, needs the human partner**: the one-time Forms/trigger OAuth consent
+(`authorizeFormsManually`, run once from the Apps Script editor as the script owner) before
+"Generate Pre-Registration Form" in Settings will actually work — this session had no
+interactive browser access to click through it.
