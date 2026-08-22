@@ -14,6 +14,37 @@ const ROLES = {
 // contingent incharges). A room only ever accepts allocations of its own type.
 const ROOM_TYPES = { TEAM: 'TEAM', INCHARGE: 'INCHARGE' };
 
+// Answer choices for both the pre-registration Google Form's "Mode of Travelling" dropdown
+// and the registration wizard's own Travel Mode field — one shared list so the two can never
+// drift apart (PreRegistration.gs's form-builder and Registration.gs's registerTeam_ both
+// read this).
+const TRAVEL_MODES = ['By Bus', 'By hired vehicle', 'By College vehicle'];
+
+// Google Form item titles for the pre-registration form — shared between the form-builder
+// (setupPreRegistrationForm_) and the response parser (_parsePreRegFormResponse_ matches
+// FormResponse.getItemResponses() entries by title, not position, so the parser keeps working
+// even if Forms reorders items internally). Only Incharge 1's Name is required on the form;
+// Incharges 2/3 are optional slots for teams that have them (spec: fixed slots, not a dynamic
+// repeating group — Google Forms can't do the latter).
+const PRE_REG_FORM_QUESTIONS = {
+  CollegeName: 'College Name',
+  DistrictName: 'District Name',
+  NumberOfTeamMembers: 'Number of Team Members',
+  Incharge1Name: 'Contingent Incharge 1 — Name',
+  Incharge1Designation: 'Contingent Incharge 1 — Designation',
+  Incharge1WhatsApp: 'Contingent Incharge 1 — WhatsApp Number',
+  Incharge1Email: 'Contingent Incharge 1 — Email Address',
+  Incharge2Name: 'Contingent Incharge 2 — Name (if any)',
+  Incharge2Designation: 'Contingent Incharge 2 — Designation',
+  Incharge2WhatsApp: 'Contingent Incharge 2 — WhatsApp Number',
+  Incharge2Email: 'Contingent Incharge 2 — Email Address',
+  Incharge3Name: 'Contingent Incharge 3 — Name (if any)',
+  Incharge3Designation: 'Contingent Incharge 3 — Designation',
+  Incharge3WhatsApp: 'Contingent Incharge 3 — WhatsApp Number',
+  Incharge3Email: 'Contingent Incharge 3 — Email Address',
+  TravelMode: 'Mode of Travelling of Team'
+};
+
 // Settings keys that uploadSignature_ (Settings.gs) is allowed to write — a fixed allowlist,
 // never an arbitrary Settings key, since the upload action is driven by a client-supplied key
 // string. Consumed by FinalDocuments.gs's Final Receipt/Relieving Order layout and Noc.gs's
@@ -34,7 +65,8 @@ const SHEET_SCHEMAS = {
   LOGIN_LOG: ['LogId', 'Attempted', 'Result', 'Timestamp'],
   TEAMS: ['TeamId', 'RegistrationNumber', 'CollegeName', 'DistrictName', 'NumberOfTeamMembers',
     'NumberOfContingentIncharges', 'TotalContingentPersons', 'RegistrationDateTime', 'Status',
-    'DepartureLockedBy', 'DepartureLockedAt', 'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt'],
+    'DepartureLockedBy', 'DepartureLockedAt', 'CreatedBy', 'CreatedAt', 'UpdatedBy', 'UpdatedAt',
+    'TravelMode'],
   CONTINGENT_INCHARGES: ['InchargeId', 'TeamId', 'Name', 'Designation', 'WhatsAppNumber',
     'EmailAddress', 'IsPrimary', 'Active', 'NeedsAccommodation', 'CreatedBy', 'CreatedAt',
     'UpdatedBy', 'UpdatedAt'],
@@ -92,7 +124,19 @@ const SHEET_SCHEMAS = {
   MATCH_FEE_TRANSACTIONS: ['TransactionId', 'MatchId', 'TeamId', 'OpponentTeamId', 'Amount',
     'RateSnapshot', 'PaymentMethod', 'PaidAt', 'CollectedBy', 'ReceiptNumber',
     'ReceiptPdfFileId', 'EmailStatus', 'Status', 'VoidReason', 'VoidedBy', 'VoidedAt',
-    'ClientRequestId', 'CreatedBy', 'CreatedAt']
+    'ClientRequestId', 'CreatedBy', 'CreatedAt'],
+  // Flattened (no separate incharges table) — the Google Form has fixed slots for up to 3
+  // incharges, not a dynamic repeating group, so there's nothing to normalize. CollegeNameKey
+  // is the trimmed/lowercased CollegeName, used only as the upsert-matching key in
+  // PreRegistration.gs (display always uses the original CollegeName). Status is PENDING or
+  // CONVERTED; TeamId/ConvertedAt/ConvertedBy are filled in once the committee converts the
+  // entry into a real team at physical check-in.
+  PRE_REGISTRATIONS: ['PreRegId', 'CollegeName', 'CollegeNameKey', 'DistrictName',
+    'NumberOfTeamMembers', 'TravelMode',
+    'Incharge1Name', 'Incharge1Designation', 'Incharge1WhatsApp', 'Incharge1Email',
+    'Incharge2Name', 'Incharge2Designation', 'Incharge2WhatsApp', 'Incharge2Email',
+    'Incharge3Name', 'Incharge3Designation', 'Incharge3WhatsApp', 'Incharge3Email',
+    'FormSubmittedAt', 'Status', 'TeamId', 'ConvertedAt', 'ConvertedBy', 'CreatedAt', 'UpdatedAt']
 };
 
 // sheetName -> ID prefix. SETTINGS (keyed) and SESSIONS (opaque random) intentionally excluded.
@@ -103,7 +147,7 @@ const ID_PREFIXES = {
   ACCOMMODATION: 'ALLOC', ACCOMMODATION_NOC: 'NOC', REFUNDS: 'REF',
   SECURITY_REFUNDS: 'SREF', SETTLEMENTS: 'SETL', RECEIPTS: 'RCT', RELIEVING: 'REL',
   DOCUMENTS: 'DOC', EMAIL_LOG: 'EML', AUDIT_LOG: 'AUD', USERS: 'USR', LOGIN_LOG: 'LOG',
-  MATCHES: 'MATCH', MATCH_FEE_TRANSACTIONS: 'MFTX'
+  MATCHES: 'MATCH', MATCH_FEE_TRANSACTIONS: 'MFTX', PRE_REGISTRATIONS: 'PREG'
 };
 
 // Wider zero-padding for high-volume append-only logs (spec §4).

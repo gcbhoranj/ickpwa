@@ -215,7 +215,7 @@ const ACTIONS = {
   },
   'registration.team.create': function (payload, sessionId) {
     const session = requireSession_(sessionId);
-    return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || []);
+    return registerTeam_(session, payload.collegeName, payload.districtName, payload.numberOfTeamMembers, payload.incharges || [], payload.travelMode, payload.preRegId);
   },
   'registration.charges.calculate': function (payload, sessionId) {
     const session = requireSession_(sessionId);
@@ -382,6 +382,26 @@ const ACTIONS = {
   'admin.bootstrap.resetTournamentData': function (payload, sessionId) {
     const session = requireSession_(sessionId);
     return resetTournamentData_(session, payload && payload.confirm);
+  },
+  'admin.bootstrap.setupPreRegistrationForm': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return setupPreRegistrationForm_(session, !!(payload && payload.force));
+  },
+  'admin.preRegistration.getFormInfo': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getPreRegistrationFormInfo_(session);
+  },
+  'admin.preRegistration.syncForm': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return syncPreRegistrationForm_(session);
+  },
+  'registration.preReg.list': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return { preRegistrations: listPendingPreRegistrations_(session) };
+  },
+  'registration.preReg.detail': function (payload, sessionId) {
+    const session = requireSession_(sessionId);
+    return getPreRegistrationDetail_(session, payload.preRegId);
   }
 };
 

@@ -1,6 +1,13 @@
 // Registration.gs — team + contingent incharges registration.
 
-function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMembers, incharges) {
+// `travelMode`/`preRegId` are both optional, backward-compatible additions (existing
+// callers/tests that omit them keep working unchanged, same convention as
+// calculateCharges_'s includeDari/includeSecurity). `preRegId`, when given, is validated as
+// still PENDING *before* the team is created (mirroring calculateCharges_'s
+// ALREADY_CALCULATED guard) so a double-click — or two operators working the same
+// pre-registration — can't convert it twice; the pre-registration row is then marked
+// CONVERTED with a link to the new team, after the team itself is safely created.
+function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMembers, incharges, travelMode, preRegId) {
   requireRole_(actorSession, [ROLES.ADMIN, ROLES.REGISTRATION]);
   if (!collegeName) throw apiError_('VALIDATION_ERROR', 'College name is required.');
   if (!districtName) throw apiError_('VALIDATION_ERROR', 'District name is required.');
@@ -10,6 +17,19 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
   incharges.forEach(function (inc) {
     if (!inc.name) throw apiError_('VALIDATION_ERROR', 'Every incharge needs a name.');
   });
+  if (travelMode && TRAVEL_MODES.indexOf(travelMode) === -1) {
+    throw apiError_('VALIDATION_ERROR', 'Unrecognized mode of travelling: ' + travelMode);
+  }
+
+  let preReg = null;
+  if (preRegId) {
+    const found = findRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId);
+    if (!found) throw apiError_('NOT_FOUND', 'No such pre-registration: ' + preRegId);
+    if (found.values.Status !== 'PENDING') {
+      throw apiError_('ALREADY_CONVERTED', 'This pre-registration has already been converted to a team.');
+    }
+    preReg = found.values;
+  }
 
   const hasPrimary = incharges.some(function (inc) { return !!inc.isPrimary; });
   const totalContingent = members + incharges.length;
@@ -21,7 +41,8 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
     TeamId: teamId, RegistrationNumber: registrationNumber, CollegeName: collegeName, DistrictName: districtName,
     NumberOfTeamMembers: members, NumberOfContingentIncharges: incharges.length, TotalContingentPersons: totalContingent,
     RegistrationDateTime: now, Status: 'REGISTERED', DepartureLockedBy: '', DepartureLockedAt: '',
-    CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now
+    CreatedBy: actorSession.userId, CreatedAt: now, UpdatedBy: actorSession.userId, UpdatedAt: now,
+    TravelMode: travelMode || ''
   });
 
   incharges.forEach(function (inc, i) {
@@ -38,6 +59,12 @@ function registerTeam_(actorSession, collegeName, districtName, numberOfTeamMemb
     AuditId: nextId_('AUD', 7), Timestamp: now, UserId: actorSession.userId, Role: actorSession.role,
     Action: 'REGISTER_TEAM', Entity: 'TEAM', EntityId: teamId, PreviousState: '', NewState: 'REGISTERED'
   });
+
+  if (preReg) {
+    updateRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId, {
+      Status: 'CONVERTED', TeamId: teamId, ConvertedAt: now, ConvertedBy: actorSession.userId
+    });
+  }
 
   return { teamId: teamId, registrationNumber: registrationNumber, totalContingentPersons: totalContingent };
 }

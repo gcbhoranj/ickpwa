@@ -748,6 +748,159 @@ function test_registration_getTeamDetail_includesNocStatus() {
   }
 }
 
+function _makePreRegParsed_(collegeName, districtName, formSubmittedAt) {
+  return {
+    CollegeName: collegeName, DistrictName: districtName, NumberOfTeamMembers: '8', TravelMode: 'By Bus',
+    Incharge1Name: 'Coach One', Incharge1Designation: 'Coach', Incharge1WhatsApp: '9000000001', Incharge1Email: '',
+    Incharge2Name: '', Incharge2Designation: '', Incharge2WhatsApp: '', Incharge2Email: '',
+    Incharge3Name: '', Incharge3Designation: '', Incharge3WhatsApp: '', Incharge3Email: '',
+    FormSubmittedAt: formSubmittedAt
+  };
+}
+
+function test_preRegistration_upsertRow_autoReplacesPendingButPreservesConverted() {
+  const createdIds = [];
+  try {
+    const row1 = _upsertPreRegistrationRow_(_makePreRegParsed_('Upsert Test  College', 'D1', '2026-01-01T00:00:00.000Z'));
+    createdIds.push(row1.PreRegId);
+    assertEqual_(row1.Status, 'PENDING', 'first submission should land as PENDING');
+
+    // Resubmission from the same college (case/whitespace-insensitive match) overwrites the
+    // PENDING row in place rather than creating a second one.
+    const row2 = _upsertPreRegistrationRow_(_makePreRegParsed_('  upsert test college', 'D2', '2026-01-02T00:00:00.000Z'));
+    assertEqual_(row2.PreRegId, row1.PreRegId, 'resubmission from the same college should overwrite the existing PENDING row, not append a new one');
+    assertEqual_(row2.DistrictName, 'D2', 'overwritten row should carry the newer submission\'s data');
+    assertEqual_(findRowsByField_('PRE_REGISTRATIONS', 'CollegeNameKey', _preRegCollegeKey_('Upsert Test College')).length, 1, 'still exactly one row for this college after resubmission');
+
+    updateRowById_('PRE_REGISTRATIONS', 'PreRegId', row2.PreRegId, { Status: 'CONVERTED', TeamId: 'TEAM-TEST' });
+
+    // A further resubmission after conversion must NOT touch the converted row — it becomes a
+    // fresh PENDING row instead, so the team's link is never silently unconverted.
+    const row3 = _upsertPreRegistrationRow_(_makePreRegParsed_('Upsert Test College', 'D3', '2026-01-03T00:00:00.000Z'));
+    createdIds.push(row3.PreRegId);
+    assertTrue_(row3.PreRegId !== row2.PreRegId, 'resubmission after conversion should append a new row, not overwrite the converted one');
+    const stillConverted = findRowById_('PRE_REGISTRATIONS', 'PreRegId', row2.PreRegId).values;
+    assertEqual_(stillConverted.Status, 'CONVERTED', 'the converted row must stay CONVERTED');
+    assertEqual_(stillConverted.TeamId, 'TEAM-TEST', 'the converted row must keep its TeamId link');
+    assertEqual_(row3.Status, 'PENDING', 'the new row from the post-conversion resubmission should be PENDING');
+  } finally {
+    createdIds.forEach(function (id) { deleteRowById_('PRE_REGISTRATIONS', 'PreRegId', id); });
+  }
+}
+
+function test_preRegistration_getPreRegistrationDetail_reshapesInchargesAndGuardsConverted() {
+  const adminSession = { userId: 'USR-0001', role: ROLES.ADMIN, sessionId: 'x' };
+  let preRegId = null;
+  try {
+    const now = new Date().toISOString();
+    preRegId = nextId_('PREG', 4);
+    appendRow_('PRE_REGISTRATIONS', {
+      PreRegId: preRegId, CollegeName: 'Detail Reshape College', CollegeNameKey: _preRegCollegeKey_('Detail Reshape College'),
+      DistrictName: 'D', NumberOfTeamMembers: '5', TravelMode: 'By hired vehicle',
+      Incharge1Name: 'First Incharge', Incharge1Designation: 'Manager', Incharge1WhatsApp: '111', Incharge1Email: 'a@example.com',
+      Incharge2Name: 'Second Incharge', Incharge2Designation: '', Incharge2WhatsApp: '', Incharge2Email: '',
+      Incharge3Name: '', Incharge3Designation: '', Incharge3WhatsApp: '', Incharge3Email: '',
+      FormSubmittedAt: now, Status: 'PENDING', TeamId: '', ConvertedAt: '', ConvertedBy: '', CreatedAt: now, UpdatedAt: now
+    });
+
+    const detail = getPreRegistrationDetail_(adminSession, preRegId);
+    assertEqual_(detail.incharges.length, 2, 'only filled incharge slots should be included');
+    assertEqual_(detail.incharges[0].name, 'First Incharge', 'first slot should map to first incharge');
+    assertTrue_(detail.incharges[0].isPrimary, 'slot 1 should be marked primary');
+    assertTrue_(!detail.incharges[1].isPrimary, 'slot 2 should not be marked primary');
+    assertEqual_(detail.travelMode, 'By hired vehicle', 'travel mode should pass through');
+
+    updateRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId, { Status: 'CONVERTED' });
+    let threw = false;
+    try {
+      getPreRegistrationDetail_(adminSession, preRegId);
+    } catch (err) {
+      threw = true;
+      assertEqual_(err.code, 'ALREADY_CONVERTED', 'a converted entry should be rejected with ALREADY_CONVERTED');
+    }
+    assertTrue_(threw, 'getPreRegistrationDetail_ should throw for an already-converted entry');
+  } finally {
+    if (preRegId) deleteRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId);
+  }
+}
+
+function test_registration_registerTeam_fromPreRegistration_convertsAndCopiesTravelMode() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  let preRegId = null;
+  let createdTeamId = null;
+  try {
+    const now = new Date().toISOString();
+    preRegId = nextId_('PREG', 4);
+    appendRow_('PRE_REGISTRATIONS', {
+      PreRegId: preRegId, CollegeName: 'Convert Flow College', CollegeNameKey: _preRegCollegeKey_('Convert Flow College'),
+      DistrictName: 'D', NumberOfTeamMembers: '7', TravelMode: 'By College vehicle',
+      Incharge1Name: 'Convert Incharge', Incharge1Designation: '', Incharge1WhatsApp: '', Incharge1Email: '',
+      Incharge2Name: '', Incharge2Designation: '', Incharge2WhatsApp: '', Incharge2Email: '',
+      Incharge3Name: '', Incharge3Designation: '', Incharge3WhatsApp: '', Incharge3Email: '',
+      FormSubmittedAt: now, Status: 'PENDING', TeamId: '', ConvertedAt: '', ConvertedBy: '', CreatedAt: now, UpdatedAt: now
+    });
+
+    const team = registerTeam_(regSession, 'Convert Flow College', 'D', 7, [{ name: 'Convert Incharge', isPrimary: true }], 'By College vehicle', preRegId);
+    createdTeamId = team.teamId;
+
+    const teamRow = findRowById_('TEAMS', 'TeamId', createdTeamId).values;
+    assertEqual_(teamRow.TravelMode, 'By College vehicle', 'travel mode should be copied onto the TEAMS row');
+
+    const converted = findRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId).values;
+    assertEqual_(converted.Status, 'CONVERTED', 'pre-registration should be marked CONVERTED after registerTeam_');
+    assertEqual_(converted.TeamId, createdTeamId, 'pre-registration should be linked to the new team');
+    assertTrue_(!!converted.ConvertedAt, 'ConvertedAt should be stamped');
+
+    let threw = false;
+    try {
+      registerTeam_(regSession, 'Convert Flow College', 'D', 7, [{ name: 'Convert Incharge', isPrimary: true }], 'By College vehicle', preRegId);
+    } catch (err) {
+      threw = true;
+      assertEqual_(err.code, 'ALREADY_CONVERTED', 'converting the same pre-registration twice should be rejected');
+    }
+    assertTrue_(threw, 'registerTeam_ should refuse to convert an already-converted pre-registration');
+  } finally {
+    if (createdTeamId) {
+      findRowsByField_('CONTINGENT_INCHARGES', 'TeamId', createdTeamId).forEach(function (i) { deleteRowById_('CONTINGENT_INCHARGES', 'InchargeId', i.InchargeId); });
+      deleteRowById_('TEAMS', 'TeamId', createdTeamId);
+    }
+    if (preRegId) deleteRowById_('PRE_REGISTRATIONS', 'PreRegId', preRegId);
+  }
+}
+
+function test_preRegistration_listPendingPreRegistrations_excludesConverted() {
+  const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
+  const pendingId = nextId_('PREG', 4);
+  const convertedId = nextId_('PREG', 4);
+  try {
+    const now = new Date().toISOString();
+    appendRow_('PRE_REGISTRATIONS', {
+      PreRegId: pendingId, CollegeName: 'List Pending College', CollegeNameKey: _preRegCollegeKey_('List Pending College'),
+      DistrictName: 'D', NumberOfTeamMembers: '4', TravelMode: 'By Bus',
+      Incharge1Name: 'X', Incharge1Designation: '', Incharge1WhatsApp: '', Incharge1Email: '',
+      Incharge2Name: '', Incharge2Designation: '', Incharge2WhatsApp: '', Incharge2Email: '',
+      Incharge3Name: '', Incharge3Designation: '', Incharge3WhatsApp: '', Incharge3Email: '',
+      FormSubmittedAt: now, Status: 'PENDING', TeamId: '', ConvertedAt: '', ConvertedBy: '', CreatedAt: now, UpdatedAt: now
+    });
+    appendRow_('PRE_REGISTRATIONS', {
+      PreRegId: convertedId, CollegeName: 'List Converted College', CollegeNameKey: _preRegCollegeKey_('List Converted College'),
+      DistrictName: 'D', NumberOfTeamMembers: '4', TravelMode: 'By Bus',
+      Incharge1Name: 'Y', Incharge1Designation: '', Incharge1WhatsApp: '', Incharge1Email: '',
+      Incharge2Name: '', Incharge2Designation: '', Incharge2WhatsApp: '', Incharge2Email: '',
+      Incharge3Name: '', Incharge3Designation: '', Incharge3WhatsApp: '', Incharge3Email: '',
+      FormSubmittedAt: now, Status: 'CONVERTED', TeamId: 'TEAM-TEST', ConvertedAt: now, ConvertedBy: 'USR-0001', CreatedAt: now, UpdatedAt: now
+    });
+
+    const list = listPendingPreRegistrations_(regSession);
+    const ids = list.map(function (r) { return r.preRegId; });
+    assertTrue_(ids.indexOf(pendingId) !== -1, 'pending entry should be listed');
+    assertTrue_(ids.indexOf(convertedId) === -1, 'converted entry should not be listed');
+  } finally {
+    deleteRowById_('PRE_REGISTRATIONS', 'PreRegId', pendingId);
+    deleteRowById_('PRE_REGISTRATIONS', 'PreRegId', convertedId);
+  }
+}
+
 function test_registration_getTeamDetail_redactsFinancialsForMess() {
   const regSession = { userId: 'USR-0001', role: ROLES.REGISTRATION, sessionId: 'x' };
   const messSession = { userId: 'USR-0002', role: ROLES.MESS, sessionId: 'y' };
@@ -2935,6 +3088,10 @@ const TEST_CASES = [
   { name: 'registration_registerTeam_needsAccommodationFlag', fn: test_registration_registerTeam_needsAccommodationFlag },
   { name: 'registration_getTeamDetail_includesRelievingOrder', fn: test_registration_getTeamDetail_includesRelievingOrder },
   { name: 'registration_getTeamDetail_includesNocStatus', fn: test_registration_getTeamDetail_includesNocStatus },
+  { name: 'preRegistration_upsertRow_autoReplacesPendingButPreservesConverted', fn: test_preRegistration_upsertRow_autoReplacesPendingButPreservesConverted },
+  { name: 'preRegistration_getPreRegistrationDetail_reshapesInchargesAndGuardsConverted', fn: test_preRegistration_getPreRegistrationDetail_reshapesInchargesAndGuardsConverted },
+  { name: 'registration_registerTeam_fromPreRegistration_convertsAndCopiesTravelMode', fn: test_registration_registerTeam_fromPreRegistration_convertsAndCopiesTravelMode },
+  { name: 'preRegistration_listPendingPreRegistrations_excludesConverted', fn: test_preRegistration_listPendingPreRegistrations_excludesConverted },
   { name: 'rooms_createAndList', fn: test_rooms_createAndList },
   { name: 'accommodation_listPendingAndAllocateRoom', fn: test_accommodation_listPendingAndAllocateRoom },
   { name: 'accommodation_teamMemberAllocation', fn: test_accommodation_teamMemberAllocation },

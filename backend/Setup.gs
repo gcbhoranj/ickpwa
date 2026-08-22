@@ -86,7 +86,7 @@ function resetTournamentData_(actorSession, confirm) {
     'PACKAGE_INCHARGE_MEALS', 'PRINTED_COUPONS', 'MEAL_ENTITLEMENTS', 'MEAL_USAGE',
     'MEAL_ORDER_STATUS', 'ROOMS', 'ACCOMMODATION', 'ACCOMMODATION_NOC', 'REFUNDS',
     'SECURITY_REFUNDS', 'SETTLEMENTS', 'RECEIPTS', 'RELIEVING', 'DOCUMENTS', 'EMAIL_LOG', 'AUDIT_LOG',
-    'MATCHES', 'MATCH_FEE_TRANSACTIONS'
+    'MATCHES', 'MATCH_FEE_TRANSACTIONS', 'PRE_REGISTRATIONS'
   ];
   sheetsToClear.forEach(function (name) {
     const sheet = getSheet_(name);
@@ -158,5 +158,17 @@ function authorizeDriveManually() {
 // email to the account itself so nothing external is touched by the authorization step.
 function authorizeGmailManually() {
   GmailApp.sendEmail(Session.getActiveUser().getEmail() || 'gcbhoranj@gmail.com', 'HPUICK Gmail authorization', 'This is a one-time authorization check — safe to ignore.');
+  return { authorized: true };
+}
+
+// Same pattern, for FormApp/ScriptApp trigger installation — the pre-registration feature is
+// the first thing in this project to use the Forms scope and to install a trigger
+// programmatically. Run once from the Apps Script editor's Run dropdown (as the script owner)
+// to click through the one-time consent dialog; creates and immediately trashes a throwaway
+// form so nothing lingers from the authorization step itself. Real form creation (kept, not
+// trashed) happens through setupPreRegistrationForm_ via the web app, once this has run.
+function authorizeFormsManually() {
+  const form = FormApp.create('HPUICK Forms authorization check — safe to delete');
+  DriveApp.getFileById(form.getId()).setTrashed(true);
   return { authorized: true };
 }
