@@ -1,17 +1,26 @@
 // registration.js — Registration Dashboard nav, the registration wizard, and Teams list/detail.
 
+// Must stay in sync with the backend's TRAVEL_MODES (Constants.gs) — also the choice list on
+// the pre-registration Google Form itself (PreRegistration.gs), so a team's answer there always
+// matches an option here.
+const TRAVEL_MODES = ['By Bus', 'By hired vehicle', 'By College vehicle'];
+
 function renderRegistrationDashboard(root, user) {
   root.innerHTML =
     '<div class="landing-card">' +
       '<h1>Welcome, ' + user.name + '</h1>' +
       '<p class="subtitle">Registration Committee</p>' +
       '<button id="register-team-btn">Register New Team</button>' +
+      '<button id="pre-registrations-btn">Pre-Registrations</button>' +
       '<button id="view-teams-btn">Teams</button>' +
       '<button id="match-fee-btn">Match Fee Collection</button>' +
       '<button id="logout-btn">Log Out</button>' +
     '</div>';
   document.getElementById('register-team-btn').addEventListener('click', function () {
-    navigateTo(renderRegisterWizard, root, user);
+    navigateTo(renderRegisterWizard, root, user, null);
+  });
+  document.getElementById('pre-registrations-btn').addEventListener('click', function () {
+    navigateTo(renderPreRegistrationsList, root, user);
   });
   document.getElementById('view-teams-btn').addEventListener('click', function () {
     navigateTo(renderTeamsList, root, user);
@@ -25,18 +34,43 @@ function renderRegistrationDashboard(root, user) {
   });
 }
 
-function renderRegisterWizard(root, user) {
-  const state = { teamId: null, registrationNumber: null, collegeName: null, incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }] };
+// `preRegDetail` (optional): the result of registration.preReg.detail, when this wizard was
+// opened from the Pre-Registrations list (preregistration.js) rather than "Register New
+// Team". Every field it supplies is just a starting point in `state` — fully editable, since
+// the whole point of physical verification is that pre-registered details sometimes vary and
+// need correcting on the spot.
+function renderRegisterWizard(root, user, preRegDetail) {
+  const state = preRegDetail
+    ? {
+        teamId: null, registrationNumber: null, collegeName: preRegDetail.collegeName,
+        districtName: preRegDetail.districtName, numberOfTeamMembers: preRegDetail.numberOfTeamMembers,
+        travelMode: preRegDetail.travelMode || '', preRegId: preRegDetail.preRegId,
+        incharges: preRegDetail.incharges.length
+          ? preRegDetail.incharges.map(function (inc) {
+              return { name: inc.name, designation: inc.designation, whatsapp: inc.whatsapp, email: inc.email, isPrimary: inc.isPrimary, needsAccommodation: false };
+            })
+          : [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }]
+      }
+    : {
+        teamId: null, registrationNumber: null, collegeName: null, districtName: null, numberOfTeamMembers: null,
+        travelMode: '', preRegId: null,
+        incharges: [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }]
+      };
 
   function renderTeamDetailsStep() {
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Register Team — Step 1 of 4</h1>' +
+        (state.preRegId ? '<p class="subtitle">From pre-registration — verify every field below, and correct anything that\'s changed.</p>' : '') +
         '<div id="wizard-error" class="error" style="display:none"></div>' +
         '<form id="team-details-form">' +
-          '<label>College Name<input type="text" id="college-name" required></label>' +
-          '<label>District Name<input type="text" id="district-name" required></label>' +
-          '<label>Number of Team Members<input type="number" id="team-members" min="1" required></label>' +
+          '<label>College Name<input type="text" id="college-name" value="' + (state.collegeName || '') + '" required></label>' +
+          '<label>District Name<input type="text" id="district-name" value="' + (state.districtName || '') + '" required></label>' +
+          '<label>Number of Team Members<input type="number" id="team-members" min="1" value="' + (state.numberOfTeamMembers || '') + '" required></label>' +
+          '<label>Mode of Travelling of Team<select id="travel-mode" required>' +
+            '<option value="">Select…</option>' +
+            TRAVEL_MODES.map(function (mode) { return '<option value="' + mode + '" ' + (state.travelMode === mode ? 'selected' : '') + '>' + mode + '</option>'; }).join('') +
+          '</select></label>' +
           '<div id="incharges-container"></div>' +
           '<button type="button" id="add-incharge-btn" style="background:#666">+ Add Contingent Incharge</button>' +
           '<button type="submit">Next: Calculate Charges</button>' +
@@ -94,7 +128,9 @@ function renderRegisterWizard(root, user) {
           collegeName: collegeName,
           districtName: document.getElementById('district-name').value.trim(),
           numberOfTeamMembers: Number(document.getElementById('team-members').value),
-          incharges: state.incharges
+          incharges: state.incharges,
+          travelMode: document.getElementById('travel-mode').value,
+          preRegId: state.preRegId
         });
         state.teamId = result.teamId;
         state.registrationNumber = result.registrationNumber;
@@ -245,7 +281,8 @@ async function renderTeamDetail(root, user, teamId) {
   root.innerHTML =
     '<div class="wizard-card">' +
       '<h1>' + data.team.CollegeName + '</h1>' +
-      '<p class="subtitle">' + data.team.RegistrationNumber + ' &middot; ' + data.team.DistrictName + ' &middot; ' + data.team.Status + '</p>' +
+      '<p class="subtitle">' + data.team.RegistrationNumber + ' &middot; ' + data.team.DistrictName + ' &middot; ' + data.team.Status +
+        (data.team.TravelMode ? ' &middot; ' + data.team.TravelMode : '') + '</p>' +
       '<h2>Incharges</h2>' +
       '<ul>' + data.incharges.map(function (i) { return '<li>' + i.Name + (i.IsPrimary === 'true' ? ' (Primary)' : '') + '</li>'; }).join('') + '</ul>' +
       // MESS/ACCOMMODATION never see Dari/security/total-payable or the temp receipt (backend

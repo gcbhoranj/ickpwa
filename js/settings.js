@@ -42,9 +42,10 @@ async function renderSettingsScreen(root, user) {
   const timings = await apiCall('admin.settings.getMealTimings', {});
   const tournamentInfo = await apiCall('admin.settings.getTournamentInfo', {});
   const signatures = await apiCall('admin.settings.getSignatures', {});
-  renderForm(info, timings, tournamentInfo, signatures);
+  const preRegForm = await apiCall('admin.preRegistration.getFormInfo', {});
+  renderForm(info, timings, tournamentInfo, signatures, preRegForm);
 
-  function renderForm(info, timings, tournamentInfo, signatures) {
+  function renderForm(info, timings, tournamentInfo, signatures, preRegForm) {
     const locked = info.financialSettingsLocked === 'true';
     root.innerHTML =
       '<div class="wizard-card">' +
@@ -95,6 +96,15 @@ async function renderSettingsScreen(root, user) {
         '<div id="signature-error" class="error" style="display:none"></div>' +
         Object.keys(signatures).map(function (key) { return _signatureSlotHtml(key, signatures[key]); }).join('') +
 
+        '<h2 style="margin-top:24px">Pre-Registration Form</h2>' +
+        '<p>Send this Google Form link to participating colleges well in advance — their answers show up as Pre-Registrations, ready to verify and check in on opening day.</p>' +
+        '<div id="prereg-error" class="error" style="display:none"></div>' +
+        (preRegForm.formUrl
+          ? ('<p><a href="' + preRegForm.formUrl + '" target="_blank" rel="noopener">' + preRegForm.formUrl + '</a></p>' +
+             '<button type="button" id="prereg-regenerate-btn" style="background:#666">Regenerate Form</button>' +
+             '<p class="hint">Regenerating creates a brand-new form with a new link — the old link stops accepting new answers. Only do this for a new tournament, not to fix a typo (colleges can just resubmit to correct their own answers).</p>')
+          : '<button type="button" id="prereg-generate-btn">Generate Pre-Registration Form</button>') +
+
         '<button id="back-btn" style="margin-top:16px;background:#999">Back</button>' +
       '</div>';
 
@@ -124,7 +134,7 @@ async function renderSettingsScreen(root, user) {
           const base64Data = await _readFileAsBase64(file);
           await apiCall('admin.settings.uploadSignature', { key: key, base64Data: base64Data, mimeType: file.type });
           const updatedSignatures = await apiCall('admin.settings.getSignatures', {});
-          renderForm(info, timings, tournamentInfo, updatedSignatures);
+          renderForm(info, timings, tournamentInfo, updatedSignatures, preRegForm);
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
@@ -144,7 +154,7 @@ async function renderSettingsScreen(root, user) {
           tournamentStartDate: document.getElementById('tournament-start').value,
           tournamentEndDate: document.getElementById('tournament-end').value
         });
-        renderForm(info, timings, updatedTournamentInfo, signatures);
+        renderForm(info, timings, updatedTournamentInfo, signatures, preRegForm);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
@@ -165,7 +175,7 @@ async function renderSettingsScreen(root, user) {
             security: Number(document.getElementById('rate-security').value),
             matchFee: Number(document.getElementById('rate-matchfee').value)
           });
-          renderForm(updated, timings, tournamentInfo, signatures);
+          renderForm(updated, timings, tournamentInfo, signatures, preRegForm);
         } catch (err) {
           errEl.textContent = err.message;
           errEl.style.display = 'block';
@@ -179,7 +189,7 @@ async function renderSettingsScreen(root, user) {
       try {
         await apiCall('admin.settings.setFinancialLock', { locked: !locked });
         const refreshed = await apiCall('settings.getRegistrationInfo', {});
-        renderForm(refreshed, timings, tournamentInfo, signatures);
+        renderForm(refreshed, timings, tournamentInfo, signatures, preRegForm);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
@@ -200,12 +210,35 @@ async function renderSettingsScreen(root, user) {
           dinnerEnd: document.getElementById('timing-dinner-end').value,
           graceMinutes: Number(document.getElementById('timing-grace').value)
         });
-        renderForm(info, updatedTimings, tournamentInfo, signatures);
+        renderForm(info, updatedTimings, tournamentInfo, signatures, preRegForm);
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
       }
     });
+
+    function _wirePreRegFormButton(btnId, force) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', async function () {
+        const errEl = document.getElementById('prereg-error');
+        errEl.style.display = 'none';
+        btn.disabled = true;
+        btn.textContent = 'Generating…';
+        try {
+          await apiCall('admin.bootstrap.setupPreRegistrationForm', { force: force });
+          const updatedPreRegForm = await apiCall('admin.preRegistration.getFormInfo', {});
+          renderForm(info, timings, tournamentInfo, signatures, updatedPreRegForm);
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = force ? 'Regenerate Form' : 'Generate Pre-Registration Form';
+        }
+      });
+    }
+    _wirePreRegFormButton('prereg-generate-btn', false);
+    _wirePreRegFormButton('prereg-regenerate-btn', true);
 
     document.getElementById('back-btn').addEventListener('click', function () {
       goBack();
