@@ -8,7 +8,8 @@
 // Bumped to v35 for the mobile-overflow layout fix (app.css + table wrappers across several
 // screens) — otherwise installed PWAs would keep serving the broken cached CSS/JS forever.
 // Bumped to v36 for Master Reset (new Danger Zone section in js/settings.js).
-const CACHE_NAME = 'hpuick-shell-v36';
+// Bumped to v37 for Edit Room (js/rooms.js).
+const CACHE_NAME = 'hpuick-shell-v37';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',
