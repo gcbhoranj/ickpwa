@@ -105,6 +105,12 @@ async function renderSettingsScreen(root, user) {
              '<p class="hint">Regenerating creates a brand-new form with a new link — the old link stops accepting new answers. Only do this for a new tournament, not to fix a typo (colleges can just resubmit to correct their own answers).</p>')
           : '<button type="button" id="prereg-generate-btn">Generate Pre-Registration Form</button>') +
 
+        '<h2 style="margin-top:24px;color:var(--error)">Danger Zone</h2>' +
+        '<p>Archives the current tournament\'s data and documents, then permanently clears all team/payment/room-allocation/mess/departure/match data — ready for a brand-new tournament. Settings, Users, and the Rooms inventory are not affected.</p>' +
+        '<div id="reset-error" class="error" style="display:none"></div>' +
+        '<div id="reset-preview" style="display:none;border:1px solid var(--error);border-radius:8px;padding:12px;margin:8px 0"></div>' +
+        '<button type="button" id="reset-preview-btn" style="background:var(--error)">Master Reset&hellip;</button>' +
+
         '<button id="back-btn" style="margin-top:16px;background:#999">Back</button>' +
       '</div>';
 
@@ -239,6 +245,61 @@ async function renderSettingsScreen(root, user) {
     }
     _wirePreRegFormButton('prereg-generate-btn', false);
     _wirePreRegFormButton('prereg-regenerate-btn', true);
+
+    document.getElementById('reset-preview-btn').addEventListener('click', async function () {
+      const errEl = document.getElementById('reset-error');
+      errEl.style.display = 'none';
+      try {
+        const preview = await apiCall('admin.bootstrap.resetPreview', {});
+        _renderResetConfirm(preview);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      }
+    });
+
+    function _renderResetConfirm(preview) {
+      const previewEl = document.getElementById('reset-preview');
+      const summary = Object.keys(preview.counts)
+        .map(function (sheetName) { return sheetName + ': ' + preview.counts[sheetName]; })
+        .join(' &middot; ');
+      previewEl.innerHTML =
+        '<p><strong>This will archive and permanently clear:</strong></p>' +
+        '<p style="font-size:0.85rem">' + summary + '</p>' +
+        '<label>Type the tournament name (<strong>' + preview.tournamentName + '</strong>) to confirm' +
+          '<input type="text" id="reset-confirm-name" autocomplete="off"></label>' +
+        '<button type="button" id="reset-confirm-btn" disabled style="background:var(--error)">Confirm &amp; Reset</button>' +
+        '<button type="button" id="reset-cancel-btn" style="background:#999">Cancel</button>';
+      previewEl.style.display = 'block';
+      document.getElementById('reset-preview-btn').disabled = true;
+
+      const nameInput = document.getElementById('reset-confirm-name');
+      const confirmBtn = document.getElementById('reset-confirm-btn');
+      nameInput.addEventListener('input', function () {
+        confirmBtn.disabled = nameInput.value !== preview.tournamentName;
+      });
+      document.getElementById('reset-cancel-btn').addEventListener('click', function () {
+        previewEl.style.display = 'none';
+        previewEl.innerHTML = '';
+        document.getElementById('reset-preview-btn').disabled = false;
+      });
+      confirmBtn.addEventListener('click', async function () {
+        const errEl = document.getElementById('reset-error');
+        errEl.style.display = 'none';
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Resetting…';
+        try {
+          const result = await apiCall('admin.bootstrap.resetTournamentData', { confirm: 'RESET' });
+          showToast('Tournament data reset. Archived to: ' + result.archiveFolderUrl);
+          renderSettingsScreen(root, user);
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Confirm & Reset';
+        }
+      });
+    }
 
     document.getElementById('back-btn').addEventListener('click', function () {
       goBack();
