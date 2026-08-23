@@ -73,3 +73,18 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
 .wizard-card { background: var(--card-bg); border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 fieldset { border-radius: 8px; }
 legend { font-weight: 600; color: var(--brand); padding: 0 6px; }
+
+/* Export/print controls (reports.js, registration.js Teams list) — auto-width so the
+   pair sits inline rather than stacking full-width like the default `button` rule. */
+.export-btn { width: auto; margin: 0 8px 8px 0; padding: 6px 12px; font-size: 0.8rem; background: var(--brand-light); }
+
+/* Printing a report/teams table (via window.print(), "Save as PDF" in the print dialog):
+   hide everything except the heading and the table itself — nav buttons, tab bar, and the
+   export controls make no sense on paper. Wide reports get a card that's capped at 520px
+   on screen; print needs it to use the full page width instead. */
+@media print {
+  .no-print { display: none !important; }
+  body { display: block; background: white; padding: 0; }
+  .wizard-card { box-shadow: none; max-width: 100%; padding: 0; }
+  table { font-size: 0.75rem; }
+}

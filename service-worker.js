@@ -9,9 +9,12 @@
 // screens) — otherwise installed PWAs would keep serving the broken cached CSS/JS forever.
 // Bumped to v36 for Master Reset (new Danger Zone section in js/settings.js).
 // Bumped to v37 for Edit Room (js/rooms.js).
-const CACHE_NAME = 'hpuick-shell-v37';
+// Bumped to v38 for Excel/PDF export on Reports, Audit Log, and Teams (new js/export.js and
+// js/vendor/xlsx.full.min.js, plus app.css print styles and reports.js/registration.js changes).
+const CACHE_NAME = 'hpuick-shell-v38';
 const SHELL_FILES = [
-  './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
+  './index.html', './css/app.css', './js/vendor/xlsx.full.min.js', './js/export.js',
+  './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',
   './js/mess.js', './js/departure.js', './js/reports.js', './js/app.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png'

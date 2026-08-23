@@ -83,6 +83,60 @@ function _renderReportTab(tab, bundle) {
     }).join('') + '</tbody></table></div>';
 }
 
+// Builds the same data each report tab renders as a table, as Excel sheets instead —
+// headers/rows are defined here rather than scraped off the DOM so numbers stay numbers and
+// each sheet can pick its own column order independent of the HTML table.
+function _reportExportSheets(tab, bundle) {
+  if (tab === 'financial') {
+    return { sheets: [{ name: 'Financial', headers: ['Reg No', 'College', 'Dari', 'Security', 'Food Revenue', 'Food Refund', 'Security Refunded', 'Final Balance'],
+      rows: bundle.financial.map(function (r) {
+        return [r.registrationNumber, r.collegeName, r.dariCharges, r.securityCharges, r.packageRevenue, r.foodRefund, r.securityRefunded, r.settled ? r.finalBalance : ''];
+      }) }], filename: 'financial' };
+  }
+  if (tab === 'food') {
+    return { sheets: [{ name: 'Food', headers: ['Reg No', 'College', 'Packages', 'Revenue', 'Eligible', 'Served', 'Remaining', 'Refunded'],
+      rows: bundle.food.map(function (r) {
+        return [r.registrationNumber, r.collegeName, r.packagesCount, r.packageRevenue, r.totalEligible, r.totalServed, r.totalRemaining, r.totalFoodRefund];
+      }) }], filename: 'food' };
+  }
+  if (tab === 'accommodation') {
+    return { sheets: [
+      { name: 'Rooms', headers: ['Room', 'Type', 'Capacity', 'Allocated', 'Remaining', 'Status'],
+        rows: bundle.accommodation.rooms.map(function (r) {
+          return [(r.building ? r.building + ' — ' : '') + r.roomNumber, r.roomType, r.capacity, r.allocated, r.remaining, r.status];
+        }) },
+      { name: 'Teams', headers: ['Reg No', 'College', 'Members Allocated', 'Needed', 'Incharges Allocated', 'NOC'],
+        rows: bundle.accommodation.teams.map(function (r) {
+          return [r.registrationNumber, r.collegeName, r.teamMembersAllocated, r.teamMembersNeeded, r.inchargesAllocated, r.nocStatus];
+        }) }
+    ], filename: 'accommodation' };
+  }
+  if (tab === 'departure') {
+    return { sheets: [{ name: 'Departure', headers: ['Reg No', 'College', 'Status', 'Locked By'],
+      rows: bundle.departure.map(function (r) {
+        return [r.registrationNumber, r.collegeName, r.status, r.departureLockedBy || ''];
+      }) }], filename: 'departure' };
+  }
+  if (tab === 'matchFee') {
+    const s = bundle.matchFee.summary;
+    return { sheets: [
+      { name: 'Summary', headers: ['Metric', 'Value'], rows: [
+        ['Total Collected', s.totalCollected], ['Matches', s.matchesCount], ['Team Payments', s.teamPaymentsCount], ['Pending', s.pendingCount],
+        ['Cash Collected', s.cashCollected], ['Online Collected', s.onlineCollected], ['Cheque Collected', s.chequeCollected]
+      ] },
+      { name: 'Transactions', headers: ['Match No', 'Date', 'Paying Team', 'Opponent', 'Amount', 'Receipt No.', 'Method', 'Paid At', 'Collected By', 'Status'],
+        rows: bundle.matchFee.transactions.map(function (t) {
+          return [t.matchNumber, t.matchDate, t.payingTeam, t.opponent, t.amount, t.receiptNumber, t.paymentMethod, t.paidAt, t.collectedBy, t.status];
+        }) }
+    ], filename: 'match-fee' };
+  }
+  // 'final'
+  return { sheets: [{ name: 'Final Statement', headers: ['Reg No', 'College', 'Gross', 'Food Refund', 'Net', 'Security Collected', 'Security Refunded', 'Adjustments', 'Final Balance', 'Receipt URL', 'Relieving URL'],
+    rows: bundle.collegeWiseFinalStatement.map(function (r) {
+      return [r.registrationNumber, r.collegeName, r.grossCharges, r.foodRefund, r.netCharges, r.securityCollected, r.securityRefunded, r.otherAdjustments, r.finalBalance, r.receiptPdfUrl || '', r.relievingPdfUrl || ''];
+    }) }], filename: 'final-statement' };
+}
+
 function renderReportsScreen(root, user, bundle) {
   const tabs = [
     { key: 'financial', label: 'Financial' }, { key: 'food', label: 'Food' },
@@ -96,18 +150,27 @@ function renderReportsScreen(root, user, bundle) {
     root.innerHTML =
       '<div class="wizard-card">' +
         '<h1>Reports</h1>' +
-        '<div style="margin-bottom:12px">' +
+        '<div class="no-print" style="margin-bottom:12px">' +
           tabs.map(function (t) {
             return '<button class="tab-btn" data-tab="' + t.key + '" style="' + (t.key === activeTab ? 'font-weight:bold' : '') + '">' + t.label + '</button>';
           }).join('') +
         '</div>' +
+        '<div class="no-print">' +
+          '<button type="button" id="export-excel-btn" class="export-btn">Export Excel</button>' +
+          '<button type="button" id="print-btn" class="export-btn">Print / Save PDF</button>' +
+        '</div>' +
         '<div style="overflow-x:auto">' + _renderReportTab(activeTab, bundle) + '</div>' +
-        '<button id="back-btn" style="margin-top:12px">Back</button>' +
+        '<button id="back-btn" class="no-print" style="margin-top:12px">Back</button>' +
       '</div>';
 
     Array.prototype.forEach.call(document.querySelectorAll('.tab-btn'), function (btn) {
       btn.addEventListener('click', function () { activeTab = btn.getAttribute('data-tab'); render(); });
     });
+    document.getElementById('export-excel-btn').addEventListener('click', function () {
+      const exp = _reportExportSheets(activeTab, bundle);
+      exportRowsToXlsx(exp.sheets, 'HPUICK_' + exp.filename + '_' + _exportDateStamp() + '.xlsx');
+    });
+    document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
     document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
   }
 }
@@ -119,12 +182,24 @@ async function renderAuditLogScreen(root, user) {
     '<div class="wizard-card">' +
       '<h1>Audit Log</h1>' +
       '<p class="subtitle">Most recent ' + data.entries.length + ' entries</p>' +
+      '<div class="no-print">' +
+        '<button type="button" id="export-excel-btn" class="export-btn">Export Excel</button>' +
+        '<button type="button" id="print-btn" class="export-btn">Print / Save PDF</button>' +
+      '</div>' +
       '<div style="overflow-x:auto"><table><thead><tr><th>Timestamp</th><th>User</th><th>Role</th><th>Action</th><th>Entity</th><th>Entity ID</th></tr></thead><tbody>' +
         data.entries.map(function (e) {
           return '<tr><td>' + e.Timestamp + '</td><td>' + e.UserId + '</td><td>' + e.Role + '</td><td>' + e.Action + '</td><td>' + e.Entity + '</td><td>' + e.EntityId + '</td></tr>';
         }).join('') +
       '</tbody></table></div>' +
-      '<button id="back-btn" style="margin-top:12px">Back</button>' +
+      '<button id="back-btn" class="no-print" style="margin-top:12px">Back</button>' +
     '</div>';
+  document.getElementById('export-excel-btn').addEventListener('click', function () {
+    exportRowsToXlsx(
+      [{ name: 'Audit Log', headers: ['Timestamp', 'User', 'Role', 'Action', 'Entity', 'Entity ID'],
+        rows: data.entries.map(function (e) { return [e.Timestamp, e.UserId, e.Role, e.Action, e.Entity, e.EntityId]; }) }],
+      'HPUICK_audit-log_' + _exportDateStamp() + '.xlsx'
+    );
+  });
+  document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }

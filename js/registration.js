@@ -253,6 +253,10 @@ async function renderTeamsList(root, user) {
   root.innerHTML =
     '<div class="wizard-card">' +
       '<h1>Teams</h1>' +
+      '<div class="no-print">' +
+        '<button type="button" id="export-excel-btn" class="export-btn">Export Excel</button>' +
+        '<button type="button" id="print-btn" class="export-btn">Print / Save PDF</button>' +
+      '</div>' +
       '<div style="overflow-x:auto"><table><thead><tr><th>Reg. No.</th><th>College</th><th>District</th><th>Contingent</th><th>Status</th></tr></thead>' +
       '<tbody id="teams-tbody">' +
         data.teams.map(function (t) {
@@ -261,11 +265,19 @@ async function renderTeamsList(root, user) {
             '<td>' + t.totalContingentPersons + '</td><td>' + t.status + '</td></tr>';
         }).join('') +
       '</tbody></table></div>' +
-      '<button id="back-btn">Back</button>' +
+      '<button id="back-btn" class="no-print">Back</button>' +
     '</div>';
   Array.prototype.forEach.call(document.querySelectorAll('.team-row'), function (row) {
     row.addEventListener('click', function () { navigateTo(renderTeamDetail, root, user, row.getAttribute('data-teamid')); });
   });
+  document.getElementById('export-excel-btn').addEventListener('click', function () {
+    exportRowsToXlsx(
+      [{ name: 'Teams', headers: ['Reg No', 'College', 'District', 'Contingent', 'Status'],
+        rows: data.teams.map(function (t) { return [t.registrationNumber, t.collegeName, t.districtName, t.totalContingentPersons, t.status]; }) }],
+      'HPUICK_teams_' + _exportDateStamp() + '.xlsx'
+    );
+  });
+  document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 }
 
