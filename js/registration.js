@@ -185,12 +185,12 @@ function renderRegisterWizard(root, user, preRegDetail) {
       '<div class="wizard-card">' +
         '<h1>Register Team — Step 2 of 4</h1>' +
         '<p class="subtitle">Registration No. ' + state.registrationNumber + '</p>' +
-        '<table><tbody>' +
+        '<div style="overflow-x:auto"><table><tbody>' +
           '<tr><td>Total Contingent</td><td>' + charges.totalContingentPersons + '</td></tr>' +
           (charges.dariCharges > 0 ? '<tr><td>Dari Charges</td><td>Rs ' + charges.dariCharges + '</td></tr>' : '') +
           (charges.securityCharges > 0 ? '<tr><td>Security (refundable, not a charge)</td><td>Rs ' + charges.securityCharges + '</td></tr>' : '') +
           '<tr><td><b>Total to Collect</b></td><td><b>Rs ' + charges.totalPayable + '</b></td></tr>' +
-        '</tbody></table>' +
+        '</tbody></table></div>' +
         '<button id="next-payment-btn">Next: Record Payment</button>' +
       '</div>';
     document.getElementById('next-payment-btn').addEventListener('click', function () { renderPaymentStep(); });
@@ -253,14 +253,14 @@ async function renderTeamsList(root, user) {
   root.innerHTML =
     '<div class="wizard-card">' +
       '<h1>Teams</h1>' +
-      '<table><thead><tr><th>Reg. No.</th><th>College</th><th>District</th><th>Contingent</th><th>Status</th></tr></thead>' +
+      '<div style="overflow-x:auto"><table><thead><tr><th>Reg. No.</th><th>College</th><th>District</th><th>Contingent</th><th>Status</th></tr></thead>' +
       '<tbody id="teams-tbody">' +
         data.teams.map(function (t) {
           return '<tr class="team-row" data-teamid="' + t.teamId + '" style="cursor:pointer">' +
             '<td>' + t.registrationNumber + '</td><td>' + t.collegeName + '</td><td>' + t.districtName + '</td>' +
             '<td>' + t.totalContingentPersons + '</td><td>' + t.status + '</td></tr>';
         }).join('') +
-      '</tbody></table>' +
+      '</tbody></table></div>' +
       '<button id="back-btn">Back</button>' +
     '</div>';
   Array.prototype.forEach.call(document.querySelectorAll('.team-row'), function (row) {

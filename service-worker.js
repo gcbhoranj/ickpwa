@@ -5,7 +5,9 @@
 // js/accommodation.js — Admin Settings, Admin Rooms, and the Accommodation Dashboard).
 // Bumped to v33 for pre-registration (new js/preregistration.js, registration.js/settings.js changes).
 // Bumped to v34 for TMS rebrand (new app icons, manifest name/short_name, page title).
-const CACHE_NAME = 'hpuick-shell-v34';
+// Bumped to v35 for the mobile-overflow layout fix (app.css + table wrappers across several
+// screens) — otherwise installed PWAs would keep serving the broken cached CSS/JS forever.
+const CACHE_NAME = 'hpuick-shell-v35';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',

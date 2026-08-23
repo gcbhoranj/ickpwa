@@ -6,35 +6,35 @@
 function _pendingSection(kind, title, pending, noneText) {
   if (pending.length === 0) return '<h2>' + title + '</h2><p>' + noneText + '</p>';
   return '<h2>' + title + '</h2>' +
-    '<table><thead><tr><th>Reg. No.</th><th>College</th><th>Remaining</th><th></th></tr></thead><tbody>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Reg. No.</th><th>College</th><th>Remaining</th><th></th></tr></thead><tbody>' +
       pending.map(function (t) {
         return '<tr><td>' + t.registrationNumber + '</td><td>' + t.collegeName + '</td><td>' + t.remainingCount + '</td>' +
           '<td><button class="allocate-btn" data-kind="' + kind + '" data-teamid="' + t.teamId + '" data-remaining="' + t.remainingCount + '">Allocate</button></td></tr>';
       }).join('') +
-    '</tbody></table>';
+    '</tbody></table></div>';
 }
 
 function _roomsSection(title, rooms) {
   if (rooms.length === 0) return '<h2>' + title + '</h2><p>None yet.</p>';
   return '<h2>' + title + '</h2>' +
-    '<table><thead><tr><th>Building / Hotel</th><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Building / Hotel</th><th>Room No.</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead><tbody>' +
       rooms.map(function (r) {
         return '<tr><td>' + r.building + '</td><td>' + r.roomNumber + '</td><td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
       }).join('') +
-    '</tbody></table>';
+    '</tbody></table></div>';
 }
 
 function _activeSection(kind, title, active, noneText) {
   if (active.length === 0) return '<h2>' + title + '</h2><p>' + noneText + '</p>';
   return '<h2>' + title + '</h2>' +
-    '<table><thead><tr><th>Reg. No.</th><th>College</th><th>Room</th><th>Persons</th><th></th><th></th></tr></thead><tbody>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Reg. No.</th><th>College</th><th>Room</th><th>Persons</th><th></th><th></th></tr></thead><tbody>' +
       active.map(function (a) {
         return '<tr><td>' + a.registrationNumber + '</td><td>' + a.collegeName + '</td>' +
           '<td>' + (a.building ? a.building + ' — ' : '') + a.roomNumber + '</td><td>' + a.personsAllocated + '</td>' +
           '<td><button class="reallocate-btn" data-kind="' + kind + '" data-allocid="' + a.allocationId + '">Reallocate</button></td>' +
           '<td><button class="vacate-btn" data-allocid="' + a.allocationId + '">Vacate</button></td></tr>';
       }).join('') +
-    '</tbody></table>';
+    '</tbody></table></div>';
 }
 
 async function renderAccommodationDashboard(root, user) {

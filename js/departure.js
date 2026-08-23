@@ -58,13 +58,13 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + ' &middot; ' + overview.team.Status + '</p>' +
         '<div id="departure-error" class="error" style="display:none"></div>' +
         '<h2>Meal Entitlements (reference only — refund amount is the Mess Committee\'s call, recorded on their own screen)</h2>' +
-        '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Food Refund</th></tr></thead><tbody>' +
+        '<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Food Refund</th></tr></thead><tbody>' +
           overview.entitlements.map(function (e) {
             const refundRow = overview.refunds.filter(function (r) { return r.EntitlementId === e.entitlementId; })[0];
             return '<tr><td>' + e.date + '</td><td>' + e.meal + '</td><td>' + e.eligiblePersons + '</td><td>' + e.servedPersons + '</td><td>' + e.remainingPersons + '</td><td>' + e.mealOrderStatus + '</td>' +
               '<td>' + (refundRow ? 'Refunded: Rs ' + refundRow.RefundAmount : 'Awaiting Mess Committee') + '</td></tr>';
           }).join('') +
-        '</tbody></table>' +
+        '</tbody></table></div>' +
         '<h2 style="margin-top:16px">Security Refund</h2>' +
         '<p>Charged: Rs ' + overview.securityCharged + ' &middot; NOC: ' + overview.nocStatus + '</p>' +
         (overview.securityRefunds.length > 0

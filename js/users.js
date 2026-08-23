@@ -7,9 +7,9 @@ async function renderUsersScreen(root, user) {
       '<h1>Users</h1>' +
       '<p class="subtitle">Signed in as ' + user.name + ' (Admin)</p>' +
       '<div id="users-error" class="error" style="display:none"></div>' +
-      '<table id="users-table"><thead><tr>' +
+      '<div style="overflow-x:auto"><table id="users-table"><thead><tr>' +
         '<th>Name</th><th>Login ID / Email</th><th>Role</th><th>Active</th><th></th>' +
-      '</tr></thead><tbody id="users-tbody"></tbody></table>' +
+      '</tr></thead><tbody id="users-tbody"></tbody></table></div>' +
       '<h2>Add User</h2>' +
       '<form id="add-user-form">' +
         '<label>Name<input type="text" id="new-name" required></label>' +

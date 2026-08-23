@@ -49,7 +49,7 @@ async function renderCurrentMealScreen(root, user) {
           ? 'Currently serving: <strong>' + data.currentMeal + '</strong> (' + data.windowStart + '–' + data.windowEnd + ')'
           : 'No meal is currently within its serving window.') + '</p>' +
         '<div id="mess-error" class="error" style="display:none"></div>' +
-        '<table><thead><tr><th>Meal</th><th>Order Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div style="overflow-x:auto"><table><thead><tr><th>Meal</th><th>Order Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<button id="back-btn" style="margin-top:16px">Back</button>' +
       '</div>';
 
@@ -79,11 +79,11 @@ async function renderTodaysSummaryScreen(root, user) {
       '<p class="subtitle">' + data.date + (data.meal ? ' — ' + data.meal : ' — no meal currently active') + '</p>' +
       (data.rows.length === 0
         ? '<p>No teams have an entitlement for the current meal.</p>'
-        : '<table><thead><tr><th>College</th><th>Eligible</th><th>Served</th><th>Remaining</th></tr></thead><tbody>' +
+        : '<div style="overflow-x:auto"><table><thead><tr><th>College</th><th>Eligible</th><th>Served</th><th>Remaining</th></tr></thead><tbody>' +
             data.rows.map(function (r) {
               return '<tr><td>' + r.collegeName + '</td><td>' + r.eligiblePersons + '</td><td>' + r.servedPersons + '</td><td>' + r.remainingPersons + '</td></tr>';
             }).join('') +
-          '</tbody></table>') +
+          '</tbody></table></div>') +
       '<button id="back-btn" style="margin-top:16px">Back</button>' +
     '</div>';
   document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
@@ -200,11 +200,11 @@ async function renderScanScreen(root, user) {
         '<h1>Scan</h1>' +
         '<p class="subtitle">' + resolved.collegeName + ' — Package ' + resolved.packageNumber + '</p>' +
         '<p>' + resolved.meal + ' (' + resolved.date + ')</p>' +
-        '<table><tbody>' +
+        '<div style="overflow-x:auto"><table><tbody>' +
           '<tr><th>Eligible</th><td>' + resolved.eligiblePersons + '</td></tr>' +
           '<tr><th>Already Served</th><td>' + resolved.servedPersons + '</td></tr>' +
           '<tr><th>Remaining</th><td>' + resolved.remainingPersons + '</td></tr>' +
-        '</tbody></table>' +
+        '</tbody></table></div>' +
         '<div id="scan-error" class="error" style="display:none"></div>' +
         '<label>How many are eating right now?<input type="number" id="claim-count" min="1" value="' + resolved.remainingPersons + '"></label>' +
         '<button id="confirm-btn">Confirm</button>' +
@@ -267,7 +267,7 @@ async function renderFoodRefundScreen(root, user, teamId, registrationNumber, co
         '<h1>Food Refund</h1>' +
         '<p class="subtitle">' + collegeName + ' &middot; ' + registrationNumber + '</p>' +
         '<div id="food-refund-error" class="error" style="display:none"></div>' +
-        '<table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Refund Amount</th></tr></thead><tbody>' +
+        '<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Meal</th><th>Eligible</th><th>Served</th><th>Remaining</th><th>Order Status</th><th>Refund Amount</th></tr></thead><tbody>' +
           overview.entitlements.map(function (e) {
             return '<tr><td>' + e.date + '</td><td>' + e.meal + '</td><td>' + e.eligiblePersons + '</td><td>' + e.servedPersons + '</td><td>' + e.remainingPersons + '</td><td>' + e.mealOrderStatus + '</td>' +
               '<td>' + (e.alreadyRefunded ? 'Refunded' :
@@ -275,7 +275,7 @@ async function renderFoodRefundScreen(root, user, teamId, registrationNumber, co
                 (e.suggestedRefund > 0 ? '<div class="hint">Unused: ' + e.remainingPersons + ' &times; Rs ' + e.rate + ' = Rs ' + e.suggestedRefund + '</div>' : '')
               ) + '</td></tr>';
           }).join('') +
-        '</tbody></table>' +
+        '</tbody></table></div>' +
         '<button id="submit-food-refund-btn" style="margin-top:8px">Record Food Refund</button>' +
         '<button id="back-btn" style="margin-top:12px">Back</button>' +
       '</div>';

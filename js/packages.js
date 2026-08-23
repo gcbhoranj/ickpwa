@@ -55,7 +55,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
         '<div id="packages-error" class="error" style="display:none"></div>' +
         (data.packages.length === 0
           ? '<p>No packages purchased yet.</p>'
-          : '<table><thead><tr><th>#</th><th>Eligible</th><th>Amount</th><th>Meals</th><th>Dinner</th><th>Bkfst/Lunch</th><th>Status</th><th></th></tr></thead><tbody>' +
+          : '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Eligible</th><th>Amount</th><th>Meals</th><th>Dinner</th><th>Bkfst/Lunch</th><th>Status</th><th></th></tr></thead><tbody>' +
               data.packages.map(function (p) {
                 return '<tr>' +
                   '<td>' + p.packageNumber + '</td><td>' + p.eligiblePersons + '</td><td>Rs ' + p.amount + '</td>' +
@@ -68,7 +68,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
                   '</td>' +
                 '</tr>';
               }).join('') +
-            '</tbody></table>') +
+            '</tbody></table></div>') +
         '<h2>Purchase Package</h2>' +
         '<form id="purchase-form">' +
           '<label>Dinner Date (leave blank to auto-continue)<input type="date" id="purchase-dinner-date"></label>' +
@@ -80,7 +80,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
           ((incharges && incharges.length > 0)
             ? '<h3 style="margin:16px 0 4px">Incharge meal selection</h3>' +
               '<p class="subtitle" style="margin:0 0 8px">Team members are always included in every meal. Tick only the meals each incharge will actually eat at mess — e.g. leave Breakfast/Dinner blank if they\'re staying at a hotel.</p>' +
-              '<table><thead><tr><th>Incharge</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead><tbody>' +
+              '<div style="overflow-x:auto"><table><thead><tr><th>Incharge</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead><tbody>' +
                 incharges.map(function (inc) {
                   return '<tr data-inchargeid="' + inc.InchargeId + '">' +
                     '<td>' + inc.Name + (inc.Designation ? ' (' + inc.Designation + ')' : '') + '</td>' +
@@ -89,7 +89,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
                     '<td><input type="checkbox" class="incharge-meal" data-meal="dinner"></td>' +
                   '</tr>';
                 }).join('') +
-              '</tbody></table>'
+              '</tbody></table></div>'
             : '') +
           '<label>Payment Mode<select id="purchase-mode">' +
             '<option value="Cash">Cash</option>' +

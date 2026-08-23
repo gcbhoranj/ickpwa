@@ -4,13 +4,13 @@
 
 function _roomsTable(rooms) {
   if (rooms.length === 0) return '<p>None yet.</p>';
-  return '<table><thead><tr><th>Room No.</th><th>Building</th><th>Floor</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead>' +
+  return '<div style="overflow-x:auto"><table><thead><tr><th>Room No.</th><th>Building</th><th>Floor</th><th>Capacity</th><th>Remaining</th><th>Status</th></tr></thead>' +
     '<tbody>' +
       rooms.map(function (r) {
         return '<tr><td>' + r.roomNumber + '</td><td>' + r.building + '</td><td>' + r.floor + '</td>' +
           '<td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td></tr>';
       }).join('') +
-    '</tbody></table>';
+    '</tbody></table></div>';
 }
 
 async function renderRoomsScreen(root, user) {
