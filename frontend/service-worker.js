@@ -4,7 +4,8 @@
 // README.md "Known Gotchas". Bumped to v6 for Phase 3.5 (added js/settings.js, js/rooms.js,
 // js/accommodation.js — Admin Settings, Admin Rooms, and the Accommodation Dashboard).
 // Bumped to v33 for pre-registration (new js/preregistration.js, registration.js/settings.js changes).
-const CACHE_NAME = 'hpuick-shell-v33';
+// Bumped to v34 for TMS rebrand (new app icons, manifest name/short_name, page title).
+const CACHE_NAME = 'hpuick-shell-v34';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',
