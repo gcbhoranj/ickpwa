@@ -7,7 +7,8 @@
 // Bumped to v34 for TMS rebrand (new app icons, manifest name/short_name, page title).
 // Bumped to v35 for the mobile-overflow layout fix (app.css + table wrappers across several
 // screens) — otherwise installed PWAs would keep serving the broken cached CSS/JS forever.
-const CACHE_NAME = 'hpuick-shell-v35';
+// Bumped to v36 for Master Reset (new Danger Zone section in js/settings.js).
+const CACHE_NAME = 'hpuick-shell-v36';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',
