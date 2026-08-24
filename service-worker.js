@@ -11,7 +11,8 @@
 // Bumped to v37 for Edit Room (js/rooms.js).
 // Bumped to v38 for Excel/PDF export on Reports, Audit Log, and Teams (new js/export.js and
 // js/vendor/xlsx.full.min.js, plus app.css print styles and reports.js/registration.js changes).
-const CACHE_NAME = 'hpuick-shell-v38';
+// Bumped to v39 for physical meal coupons (link label change in js/packages.js).
+const CACHE_NAME = 'hpuick-shell-v39';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/vendor/xlsx.full.min.js', './js/export.js',
   './js/api-client.js', './js/auth.js', './js/users.js',

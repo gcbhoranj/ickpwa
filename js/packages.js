@@ -62,7 +62,7 @@ async function renderPackagesScreen(root, user, teamId, registrationNumber, inch
                   '<td>' + p.mealsLabel + '</td><td>' + p.startMeal + '</td><td>' + p.endMeal + '</td><td>' + p.status + '</td>' +
                   '<td>' +
                     (p.digitalCouponUrl ? '<a href="' + p.digitalCouponUrl + '" target="_blank" rel="noopener">Digital</a> ' : '') +
-                    (p.printedCouponUrl ? '<a href="' + p.printedCouponUrl + '" target="_blank" rel="noopener">Printed</a> ' : '') +
+                    (p.printedCouponUrl ? '<a href="' + p.printedCouponUrl + '" target="_blank" rel="noopener">Coupons</a> ' : '') +
                     '<button class="resend-btn" data-packageid="' + p.packageId + '">Resend</button> ' +
                     '<button class="reprint-btn" data-packageid="' + p.packageId + '">Reprint</button>' +
                   '</td>' +
