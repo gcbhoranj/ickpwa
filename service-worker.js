@@ -17,7 +17,9 @@
 // Bumped to v41 for pre-registration's Date of Arrival + WhatsApp-joined columns
 // (js/preregistration.js).
 // Bumped to v42 for pre-registration's Accommodation Required column (js/preregistration.js).
-const CACHE_NAME = 'hpuick-shell-v42';
+// Bumped to v43 for the pre-registration-prefill needsAccommodation fix (js/registration.js
+// was discarding the backend's per-incharge answer and hardcoding false).
+const CACHE_NAME = 'hpuick-shell-v43';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/export.js',
   './js/api-client.js', './js/auth.js', './js/users.js',

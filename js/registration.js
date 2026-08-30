@@ -47,7 +47,7 @@ function renderRegisterWizard(root, user, preRegDetail) {
         travelMode: preRegDetail.travelMode || '', preRegId: preRegDetail.preRegId,
         incharges: preRegDetail.incharges.length
           ? preRegDetail.incharges.map(function (inc) {
-              return { name: inc.name, designation: inc.designation, whatsapp: inc.whatsapp, email: inc.email, isPrimary: inc.isPrimary, needsAccommodation: false };
+              return { name: inc.name, designation: inc.designation, whatsapp: inc.whatsapp, email: inc.email, isPrimary: inc.isPrimary, needsAccommodation: !!inc.needsAccommodation };
             })
           : [{ name: '', designation: '', whatsapp: '', email: '', isPrimary: true, needsAccommodation: false }]
       }
