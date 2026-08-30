@@ -16,7 +16,8 @@
 // fetched and cached on first Excel export instead — see the fetch handler below).
 // Bumped to v41 for pre-registration's Date of Arrival + WhatsApp-joined columns
 // (js/preregistration.js).
-const CACHE_NAME = 'hpuick-shell-v41';
+// Bumped to v42 for pre-registration's Accommodation Required column (js/preregistration.js).
+const CACHE_NAME = 'hpuick-shell-v42';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/export.js',
   './js/api-client.js', './js/auth.js', './js/users.js',
