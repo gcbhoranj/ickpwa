@@ -8,7 +8,22 @@
 // sheets: [{ name: 'Sheet Name', headers: ['Col A', 'Col B'], rows: [[v1, v2], ...] }, ...]
 // Building from arrays-of-arrays (rather than scraping the rendered <table>) keeps numbers as
 // numbers and gives each sheet control over column labels/order independent of the HTML.
-function exportRowsToXlsx(sheets, filename) {
+async function loadXlsxLibrary_() {
+  if (window.XLSX) return window.XLSX;
+  if (window.__hpuickXlsxPromise) return window.__hpuickXlsxPromise;
+  window.__hpuickXlsxPromise = new Promise(function (resolve, reject) {
+    const script = document.createElement('script');
+    script.src = 'js/vendor/xlsx.full.min.js';
+    script.async = true;
+    script.onload = function () { resolve(window.XLSX); };
+    script.onerror = function () { window.__hpuickXlsxPromise = null; reject(new Error('Excel export library could not be loaded.')); };
+    document.head.appendChild(script);
+  });
+  return window.__hpuickXlsxPromise;
+}
+
+async function exportRowsToXlsx(sheets, filename) {
+  const XLSX = await loadXlsxLibrary_();
   const wb = XLSX.utils.book_new();
   sheets.forEach(function (sheet) {
     const aoa = [sheet.headers].concat(sheet.rows);

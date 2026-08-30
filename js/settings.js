@@ -38,12 +38,8 @@ function _signatureSlotHtml(key, current) {
 
 async function renderSettingsScreen(root, user) {
   root.innerHTML = '<div class="wizard-card"><h1>Settings</h1><p>Loading…</p></div>';
-  const info = await apiCall('settings.getRegistrationInfo', {});
-  const timings = await apiCall('admin.settings.getMealTimings', {});
-  const tournamentInfo = await apiCall('admin.settings.getTournamentInfo', {});
-  const signatures = await apiCall('admin.settings.getSignatures', {});
-  const preRegForm = await apiCall('admin.preRegistration.getFormInfo', {});
-  renderForm(info, timings, tournamentInfo, signatures, preRegForm);
+  const bundle = await apiCall('admin.settings.getBundle', {});
+  renderForm(bundle.registrationInfo, bundle.mealTimings, bundle.tournamentInfo, bundle.signatures, bundle.preRegistrationForm);
 
   function renderForm(info, timings, tournamentInfo, signatures, preRegForm) {
     const locked = info.financialSettingsLocked === 'true';

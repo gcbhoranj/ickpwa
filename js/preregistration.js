@@ -18,12 +18,13 @@ async function renderPreRegistrationsList(root, user) {
         (statusMessage ? '<p class="hint" style="margin-top:6px">' + statusMessage + '</p>' : '') +
         (preRegistrations.length === 0
           ? '<p style="margin-top:12px">No pending pre-registrations.</p>'
-          : '<div style="overflow-x:auto"><table><thead><tr><th>College</th><th>District</th><th>Members</th><th>Travel Mode</th><th>Submitted</th></tr></thead>' +
+          : '<div style="overflow-x:auto"><table><thead><tr><th>College</th><th>District</th><th>Members</th><th>Travel Mode</th><th>Arrival Date</th><th>WhatsApp Joined</th><th>Submitted</th></tr></thead>' +
             '<tbody id="prereg-tbody">' +
               preRegistrations.map(function (r) {
                 return '<tr class="prereg-row" data-preregid="' + r.preRegId + '" style="cursor:pointer">' +
                   '<td>' + r.collegeName + '</td><td>' + r.districtName + '</td><td>' + r.numberOfTeamMembers + '</td>' +
-                  '<td>' + r.travelMode + '</td><td>' + new Date(r.formSubmittedAt).toLocaleString() + '</td>' +
+                  '<td>' + r.travelMode + '</td><td>' + (r.dateOfArrival || '—') + '</td><td>' + (r.joinedWhatsAppGroup || '—') + '</td>' +
+                  '<td>' + new Date(r.formSubmittedAt).toLocaleString() + '</td>' +
                 '</tr>';
               }).join('') +
             '</tbody></table></div>') +

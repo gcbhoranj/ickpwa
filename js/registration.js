@@ -270,8 +270,8 @@ async function renderTeamsList(root, user) {
   Array.prototype.forEach.call(document.querySelectorAll('.team-row'), function (row) {
     row.addEventListener('click', function () { navigateTo(renderTeamDetail, root, user, row.getAttribute('data-teamid')); });
   });
-  document.getElementById('export-excel-btn').addEventListener('click', function () {
-    exportRowsToXlsx(
+  document.getElementById('export-excel-btn').addEventListener('click', async function () {
+    await exportRowsToXlsx(
       [{ name: 'Teams', headers: ['Reg No', 'College', 'District', 'Contingent', 'Status'],
         rows: data.teams.map(function (t) { return [t.registrationNumber, t.collegeName, t.districtName, t.totalContingentPersons, t.status]; }) }],
       'HPUICK_teams_' + _exportDateStamp() + '.xlsx'

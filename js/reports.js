@@ -166,9 +166,9 @@ function renderReportsScreen(root, user, bundle) {
     Array.prototype.forEach.call(document.querySelectorAll('.tab-btn'), function (btn) {
       btn.addEventListener('click', function () { activeTab = btn.getAttribute('data-tab'); render(); });
     });
-    document.getElementById('export-excel-btn').addEventListener('click', function () {
+    document.getElementById('export-excel-btn').addEventListener('click', async function () {
       const exp = _reportExportSheets(activeTab, bundle);
-      exportRowsToXlsx(exp.sheets, 'HPUICK_' + exp.filename + '_' + _exportDateStamp() + '.xlsx');
+      await exportRowsToXlsx(exp.sheets, 'HPUICK_' + exp.filename + '_' + _exportDateStamp() + '.xlsx');
     });
     document.getElementById('print-btn').addEventListener('click', function () { window.print(); });
     document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
@@ -193,8 +193,8 @@ async function renderAuditLogScreen(root, user) {
       '</tbody></table></div>' +
       '<button id="back-btn" class="no-print" style="margin-top:12px">Back</button>' +
     '</div>';
-  document.getElementById('export-excel-btn').addEventListener('click', function () {
-    exportRowsToXlsx(
+  document.getElementById('export-excel-btn').addEventListener('click', async function () {
+    await exportRowsToXlsx(
       [{ name: 'Audit Log', headers: ['Timestamp', 'User', 'Role', 'Action', 'Entity', 'Entity ID'],
         rows: data.entries.map(function (e) { return [e.Timestamp, e.UserId, e.Role, e.Action, e.Entity, e.EntityId]; }) }],
       'HPUICK_audit-log_' + _exportDateStamp() + '.xlsx'

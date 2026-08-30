@@ -42,13 +42,13 @@ async function renderAccommodationDashboard(root, user) {
   await refresh();
 
   async function refresh() {
-    const pendingTeams = await apiCall('accommodation.listPending', { kind: 'TEAM' });
-    const pendingIncharges = await apiCall('accommodation.listPending', { kind: 'INCHARGE' });
-    const activeTeams = await apiCall('accommodation.listActive', { kind: 'TEAM' });
-    const activeIncharges = await apiCall('accommodation.listActive', { kind: 'INCHARGE' });
-    const roomsData = await apiCall('rooms.list', {});
-    const teamRooms = roomsData.rooms.filter(function (r) { return r.roomType === 'TEAM'; });
-    const inchargeRooms = roomsData.rooms.filter(function (r) { return r.roomType === 'INCHARGE'; });
+    const dashboard = await apiCall('accommodation.dashboard', {});
+    const pendingTeams = { teams: dashboard.pendingTeams };
+    const pendingIncharges = { teams: dashboard.pendingIncharges };
+    const activeTeams = { allocations: dashboard.activeTeams };
+    const activeIncharges = { allocations: dashboard.activeIncharges };
+    const teamRooms = dashboard.rooms.filter(function (r) { return r.roomType === 'TEAM'; });
+    const inchargeRooms = dashboard.rooms.filter(function (r) { return r.roomType === 'INCHARGE'; });
 
     root.innerHTML =
       '<div class="wizard-card">' +

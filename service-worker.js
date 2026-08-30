@@ -12,9 +12,13 @@
 // Bumped to v38 for Excel/PDF export on Reports, Audit Log, and Teams (new js/export.js and
 // js/vendor/xlsx.full.min.js, plus app.css print styles and reports.js/registration.js changes).
 // Bumped to v39 for physical meal coupons (link label change in js/packages.js).
-const CACHE_NAME = 'hpuick-shell-v39';
+// Bumped to v40 for lazy-loading js/vendor/xlsx.full.min.js (no longer a startup SHELL_FILE;
+// fetched and cached on first Excel export instead — see the fetch handler below).
+// Bumped to v41 for pre-registration's Date of Arrival + WhatsApp-joined columns
+// (js/preregistration.js).
+const CACHE_NAME = 'hpuick-shell-v41';
 const SHELL_FILES = [
-  './index.html', './css/app.css', './js/vendor/xlsx.full.min.js', './js/export.js',
+  './index.html', './css/app.css', './js/export.js',
   './js/api-client.js', './js/auth.js', './js/users.js',
   './js/registration.js', './js/preregistration.js', './js/packages.js', './js/matchfee.js', './js/settings.js', './js/rooms.js', './js/accommodation.js',
   './js/mess.js', './js/departure.js', './js/reports.js', './js/app.js', './manifest.json',
@@ -41,6 +45,22 @@ self.addEventListener('fetch', function (event) {
   if (url.hostname.indexOf('script.google') !== -1 || url.hostname.indexOf('googleusercontent') !== -1) {
     return;
   }
+  // The large XLSX library is lazy-loaded. Cache it after first use so subsequent
+  // exports remain fast/offline without paying the 0.9 MB startup cost on every launch.
+  if (url.pathname.indexOf('/js/vendor/xlsx.full.min.js') !== -1) {
+    event.respondWith(
+      caches.match(event.request).then(function (cached) {
+        if (cached) return cached;
+        return fetch(event.request).then(function (response) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(function (cache) { cache.put(event.request, copy); });
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then(function (cached) { return cached || fetch(event.request); })
   );
