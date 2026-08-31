@@ -19,7 +19,10 @@
 // Bumped to v42 for pre-registration's Accommodation Required column (js/preregistration.js).
 // Bumped to v43 for the pre-registration-prefill needsAccommodation fix (js/registration.js
 // was discarding the backend's per-incharge answer and hardcoding false).
-const CACHE_NAME = 'hpuick-shell-v43';
+// Bumped to v44 for: Delete Room (js/rooms.js), registration wizard Back buttons on steps 2-3
+// (js/registration.js), and on-screen transaction toasts across previously-silent actions
+// (js/rooms.js, js/users.js, js/accommodation.js, js/mess.js, js/departure.js).
+const CACHE_NAME = 'hpuick-shell-v44';
 const SHELL_FILES = [
   './index.html', './css/app.css', './js/export.js',
   './js/api-client.js', './js/auth.js', './js/users.js',

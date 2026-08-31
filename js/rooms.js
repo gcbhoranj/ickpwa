@@ -9,7 +9,15 @@ function _roomsTable(rooms) {
       rooms.map(function (r) {
         return '<tr><td>' + r.roomNumber + '</td><td>' + r.building + '</td><td>' + r.floor + '</td>' +
           '<td>' + r.capacity + '</td><td>' + r.remaining + '</td><td>' + r.status + '</td>' +
-          '<td><button type="button" class="edit-room-btn toggle-btn" data-roomid="' + r.roomId + '">Edit</button></td></tr>';
+          '<td>' +
+            '<button type="button" class="edit-room-btn toggle-btn" data-roomid="' + r.roomId + '">Edit</button> ' +
+            '<button type="button" class="delete-room-btn toggle-btn" data-roomid="' + r.roomId + '" style="background:var(--error)">Delete</button>' +
+            '<div class="delete-room-confirm" data-roomid="' + r.roomId + '" style="display:none;margin-top:6px">' +
+              '<p class="error" style="margin:0 0 6px">Delete room ' + r.roomNumber + '? This cannot be undone.</p>' +
+              '<button type="button" class="delete-room-confirm-btn" data-roomid="' + r.roomId + '" style="background:var(--error)">Confirm Delete</button> ' +
+              '<button type="button" class="delete-room-cancel-btn" data-roomid="' + r.roomId + '" style="background:#999">Cancel</button>' +
+            '</div>' +
+          '</td></tr>';
       }).join('') +
     '</tbody></table></div>';
 }
@@ -64,19 +72,50 @@ async function renderRoomsScreen(root, user) {
       });
     });
 
+    Array.prototype.forEach.call(document.querySelectorAll('.delete-room-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        const roomId = btn.getAttribute('data-roomid');
+        document.querySelector('.delete-room-confirm[data-roomid="' + roomId + '"]').style.display = 'block';
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.delete-room-cancel-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        const roomId = btn.getAttribute('data-roomid');
+        document.querySelector('.delete-room-confirm[data-roomid="' + roomId + '"]').style.display = 'none';
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.delete-room-confirm-btn'), function (btn) {
+      btn.addEventListener('click', async function () {
+        const roomId = btn.getAttribute('data-roomid');
+        const room = data.rooms.filter(function (r) { return r.roomId === roomId; })[0];
+        const errEl = document.getElementById('rooms-error');
+        errEl.style.display = 'none';
+        try {
+          await apiCall('admin.rooms.delete', { roomId: roomId });
+          showToast('Room ' + (room ? room.roomNumber : roomId) + ' has been deleted');
+          await refresh(null);
+        } catch (err) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+      });
+    });
+
     if (editingRoom) {
       document.getElementById('edit-room-form').addEventListener('submit', async function (e) {
         e.preventDefault();
         const errEl = document.getElementById('rooms-error');
         errEl.style.display = 'none';
         try {
+          const roomNumber = document.getElementById('edit-room-number').value.trim();
           await apiCall('admin.rooms.update', {
             roomId: editingRoom.roomId,
-            roomNumber: document.getElementById('edit-room-number').value.trim(),
+            roomNumber: roomNumber,
             building: document.getElementById('edit-room-building').value.trim(),
             floor: document.getElementById('edit-room-floor').value.trim(),
             capacity: Number(document.getElementById('edit-room-capacity').value)
           });
+          showToast('Room ' + roomNumber + ' has been updated');
           await refresh(null);
         } catch (err) {
           errEl.textContent = err.message;
@@ -92,13 +131,15 @@ async function renderRoomsScreen(root, user) {
         const errEl = document.getElementById('rooms-error');
         errEl.style.display = 'none';
         try {
+          const roomNumber = document.getElementById('new-room-number').value.trim();
           await apiCall('admin.rooms.create', {
             roomType: document.getElementById('new-room-type').value,
-            roomNumber: document.getElementById('new-room-number').value.trim(),
+            roomNumber: roomNumber,
             building: document.getElementById('new-room-building').value.trim(),
             floor: document.getElementById('new-room-floor').value.trim(),
             capacity: Number(document.getElementById('new-room-capacity').value)
           });
+          showToast('Room ' + roomNumber + ' has been added');
           await refresh(null);
         } catch (err) {
           errEl.textContent = err.message;

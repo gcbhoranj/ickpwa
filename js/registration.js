@@ -159,7 +159,10 @@ function renderRegisterWizard(root, user, preRegDetail) {
           '<label><input type="checkbox" id="include-security" checked> Security (refundable)</label>' +
           '<button type="submit">Calculate Charges</button>' +
         '</form>' +
+        '<button id="back-btn" style="margin-top:8px;background:#999">Back to Dashboard</button>' +
       '</div>';
+
+    document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
 
     document.getElementById('charges-select-form').addEventListener('submit', async function (e) {
       e.preventDefault();
@@ -192,8 +195,10 @@ function renderRegisterWizard(root, user, preRegDetail) {
           '<tr><td><b>Total to Collect</b></td><td><b>Rs ' + charges.totalPayable + '</b></td></tr>' +
         '</tbody></table></div>' +
         '<button id="next-payment-btn">Next: Record Payment</button>' +
+        '<button id="back-btn" style="margin-top:8px;background:#999">Back to Dashboard</button>' +
       '</div>';
     document.getElementById('next-payment-btn').addEventListener('click', function () { renderPaymentStep(); });
+    document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
   }
 
   function renderPaymentStep() {
@@ -210,7 +215,9 @@ function renderRegisterWizard(root, user, preRegDetail) {
           '</select></label>' +
           '<button type="submit">Confirm Payment Received</button>' +
         '</form>' +
+        '<button id="back-btn" style="margin-top:8px;background:#999">Back to Dashboard</button>' +
       '</div>';
+    document.getElementById('back-btn').addEventListener('click', function () { goBack(); });
     document.getElementById('payment-form').addEventListener('submit', async function (e) {
       e.preventDefault();
       const errEl = document.getElementById('wizard-error');

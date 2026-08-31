@@ -52,10 +52,12 @@ async function renderUsersScreen(root, user) {
         const errEl = document.getElementById('users-error');
         errEl.style.display = 'none';
         try {
+          const nowActive = btn.getAttribute('data-active') !== 'true';
           await apiCall('admin.users.setActive', {
             userId: btn.getAttribute('data-userid'),
-            active: btn.getAttribute('data-active') !== 'true'
+            active: nowActive
           });
+          showToast('User ' + (nowActive ? 'enabled' : 'disabled'));
           await refreshList();
         } catch (err) {
           errEl.textContent = err.message;
@@ -71,13 +73,15 @@ async function renderUsersScreen(root, user) {
     errEl.style.display = 'none';
     const role = roleSelect.value;
     try {
+      const name = document.getElementById('new-name').value.trim();
       await apiCall('admin.users.create', {
-        name: document.getElementById('new-name').value.trim(),
+        name: name,
         role: role,
         loginId: document.getElementById('new-loginid').value.trim(),
         email: document.getElementById('new-email').value.trim(),
         password: document.getElementById('new-password').value
       });
+      showToast('User ' + name + ' has been added');
       document.getElementById('add-user-form').reset();
       await refreshList();
     } catch (err) {

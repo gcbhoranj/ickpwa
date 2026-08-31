@@ -81,6 +81,7 @@ async function renderAccommodationDashboard(root, user) {
         errEl.style.display = 'none';
         try {
           await apiCall('accommodation.vacateRoom', { allocationId: btn.getAttribute('data-allocid') });
+          showToast('Room allocation vacated');
           await refresh();
         } catch (err) {
           errEl.textContent = err.message;
@@ -136,6 +137,7 @@ async function renderAccommodationDashboard(root, user) {
           roomId: document.getElementById('allocate-room').value,
           personsAllocated: Number(document.getElementById('allocate-persons').value)
         });
+        showToast('Room allocated successfully');
         await refresh();
       } catch (err) {
         errEl.textContent = err.message;
@@ -172,6 +174,7 @@ async function renderAccommodationDashboard(root, user) {
           allocationId: allocationId,
           newRoomId: document.getElementById('reallocate-room').value
         });
+        showToast('Room reallocated successfully');
         await refresh();
       } catch (err) {
         errEl.textContent = err.message;
@@ -212,6 +215,7 @@ async function renderNocScreen(root, user, teamId, registrationNumber, collegeNa
         errEl.style.display = 'none';
         try {
           const granted = await apiCall('accommodation.noc.issue', { teamId: teamId });
+          showToast('NOC granted for ' + collegeName);
           render({ status: 'NOC_GRANTED', pdfUrl: granted.pdfUrl, notes: '' });
         } catch (err) {
           errEl.textContent = err.message;
@@ -224,6 +228,7 @@ async function renderNocScreen(root, user, teamId, registrationNumber, collegeNa
         const remarks = document.getElementById('decline-remarks').value.trim();
         try {
           const declined = await apiCall('accommodation.noc.decline', { teamId: teamId, remarks: remarks });
+          showToast('NOC declined for ' + collegeName);
           render({ status: 'DECLINED', notes: declined.notes });
         } catch (err) {
           errEl.textContent = err.message;

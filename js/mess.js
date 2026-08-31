@@ -58,7 +58,9 @@ async function renderCurrentMealScreen(root, user) {
         const errEl = document.getElementById('mess-error');
         errEl.style.display = 'none';
         try {
-          await apiCall('mess.setMealOrderStatus', { date: data.date, meal: btn.getAttribute('data-meal'), status: btn.getAttribute('data-status') });
+          const status = btn.getAttribute('data-status');
+          await apiCall('mess.setMealOrderStatus', { date: data.date, meal: btn.getAttribute('data-meal'), status: status });
+          showToast(btn.getAttribute('data-meal') + ' marked ' + status);
           await refresh();
         } catch (err) {
           errEl.textContent = err.message;
@@ -217,6 +219,7 @@ async function renderScanScreen(root, user) {
       const count = parseInt(document.getElementById('claim-count').value, 10);
       try {
         const result = await apiCall('mess.recordUsage', { qrToken: resolved.qrToken, count: count });
+        if (!result.replay) showToast(result.collegeName + ' — ' + result.meal + ' served');
         renderSuccess(result);
       } catch (err) {
         errEl.textContent = err.message; // the eligible/served/remaining/requested numbers are already visible above
@@ -289,6 +292,7 @@ async function renderFoodRefundScreen(root, user, teamId, registrationNumber, co
       if (entries.length === 0) return;
       try {
         await apiCall('departure.recordFoodRefund', { teamId: teamId, entries: entries });
+        showToast('Food refund recorded for ' + collegeName);
         overview = await apiCall('mess.foodRefund.overview', { teamId: teamId });
         render();
       } catch (err) {

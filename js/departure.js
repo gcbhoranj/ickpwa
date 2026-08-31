@@ -38,6 +38,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
       errEl.style.display = 'none';
       try {
         await apiCall('departure.initiate', { teamId: teamId });
+        showToast('Departure initiated for ' + collegeName);
         overview = await apiCall('departure.overview', { teamId: teamId });
         renderInProgress();
       } catch (err) {
@@ -83,6 +84,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
         errEl.style.display = 'none';
         try {
           await apiCall('departure.recordSecurityRefund', { teamId: teamId, amount: Number(document.getElementById('security-refund-amount').value) });
+          showToast('Security refund recorded for ' + collegeName);
           overview = await apiCall('departure.overview', { teamId: teamId });
           renderInProgress();
         } catch (err) {
@@ -109,6 +111,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
             relievingSession: document.getElementById('relieving-session').value,
             relievingDate: document.getElementById('relieving-date').value
           });
+          showToast('Departure finalized for ' + collegeName);
           renderFinalizedConfirmation(finalized);
         } catch (err) {
           errEl.textContent = err.message;
@@ -122,6 +125,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
       errEl.style.display = 'none';
       try {
         await apiCall('departure.cancel', { teamId: teamId });
+        showToast('Departure cancelled for ' + collegeName);
         goBack();
       } catch (err) {
         errEl.textContent = err.message;
@@ -161,6 +165,7 @@ async function renderDepartureScreen(root, user, teamId, registrationNumber, col
       const recipientEmails = raw ? raw.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s; }) : [];
       try {
         const resent = await apiCall('departure.resendFinalDocuments', { teamId: teamId, recipientEmails: recipientEmails });
+        showToast('Final documents ' + (resent.emailStatus === 'SENT' ? 'resent' : 'resend attempted') + ' for ' + collegeName);
         renderFinalizedConfirmation(resent);
       } catch (err) {
         errEl.textContent = err.message;
